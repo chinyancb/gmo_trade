@@ -3,6 +3,7 @@ import sys
 import glob
 import re
 import logging
+import logging.config
 from pathlib import Path
 import itertools
 import requests
@@ -86,17 +87,21 @@ class TradUltil(object):
     def __init__(self): 
 
         # データ関連
-        self.close_rate_df   = pd.DataFrame()                              # closeレート格納用
-        self.macd_stream_df  = pd.DataFrame()                              # macdリアルタイムデータ格納用
-        self.stoch_stream_df = pd.DataFrame()                              # ストキャスティクスデータ格納用
-        self.macd_df         = pd.DataFrame()                              # macd確定値データ格納用
-        self.stoch_df        = pd.DataFrame()                              # ストキャスティクス確定値データ格納用
-        self.pos_jdg_df      = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
+        self.close_rate_df    = pd.DataFrame()                              # closeレート格納用
+        self.macd_stream_df   = pd.DataFrame()                              # macdリアルタイムデータ格納用
+        self.stoch_stream_df  = pd.DataFrame()                              # ストキャスティクスデータ格納用
+        self.macd_df          = pd.DataFrame()                              # macd確定値データ格納用
+        self.stoch_df         = pd.DataFrame()                              # ストキャスティクス確定値データ格納用
+        self.pos_jdg_df       = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
+        self.pos_macd_jdg_df  = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
+        self.pos_stoch_jdg_df = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
 
         # ファイル関連
         self.close_filename = f"close_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}" # closeデータの書き出しファイル名
         self.macd_filename  = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macdデータの書き出しファイル名
-        self.pos_filename   = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"   # ポジションデータの書き出しファイル名
+        self.stock_filename  = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macdデータの書き出しファイル名
+        self.pos_macd_filename   = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"   # ポジションデータの書き出しファイル名
+        self.pos_stoch_filename   = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"   # ポジションデータの書き出しファイル名
 
         # フラグ関連
         self.is_div         = False                                       # ダイバージェンスが発生していればTrue,起きていなければFalse 
@@ -735,13 +740,13 @@ class TradUltil(object):
 
 
 
-    def scrap_macd_stoch(self, sleep_sec=1, n_row=70):
+    def scrap_macd_stoch(self, sleep_sec=1, n_row=65):
         """
         *tradingviewの自作のチャートからmacd,ストキャスティクスの値を取得する
          →https://jp.tradingview.com/chart/wTJWkxIA/
         * param
             sleep_sec:int (default 1) スリープ時間(秒)
-            n_row:int (default 70) 作成したdataframeを保持する行数.超えると削除
+            n_row:int (default 65) 作成したdataframeを保持する行数.超えると削除
         * return
             無し
             取得成功
@@ -795,6 +800,7 @@ class TradUltil(object):
             except Exception as e:
                 log.critical(f'cant get macd data : [{e}]')
                 driver.quit()
+                self.init_memb()
                 raise MacdScrapGetError(f'cant open headless browser : [{e}]')
 
 
@@ -807,22 +813,81 @@ class TradUltil(object):
 
             del(macd_stream_df_tmp)
             del(stoch_stream_df_tmp)
-
             time.sleep(sleep_sec)
+
+            # 1分足macd,stochのcloseデータを作成
+            self.mk_close_macd()
+            self.mk_close_stoch()
 
             # メモリ削減のため古いデータを削除
             if len(self.macd_stream_df)  == n_row:self.macd_stream_df.drop(index=0, inplace=True)
             if len(self.stoch_stream_df) == n_row:self.stoch_stream_df.drop(index=0, inplace=True)
-
             log.info(f'scraping 1cycle done')
 
-# test
-            print('----- macd -----')
-            print(self.macd_stream_df)
-    
-            print('----- stoch -----')
-            print(self.stoch_stream_df)
-# test
+
+
+    def mk_close_macd(self, n_row=30):
+        """
+        * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
+        * param
+            なし
+        * return
+            True :bool closeデータ作成成功
+            False:bool closeデータ作成失敗
+            None :bool closeデータが見つからない場合
+        """
+        log.info(f'mk_close_macd() called') 
+
+        try:
+            macd_df_tmp = self.macd_stream_df[self.macd_stream_df.index.max():self.macd_stream_df.index.max()+1]
+            if macd_df_tmp['get_time'].item().second != 59:
+                log.info(f'not found close macd record')
+                return None
+        except Exception as e:
+            log.error(f'cant get close macd : [{e}]')
+            return False
+
+        # メンバに登録
+        self.macd_df = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
+        log.info(f'close macd data make done')
+#test
+        print('----- macd -----')
+        print(self.macd_df)
+        if len(self.macd_df)  == n_row:self.macd_df.drop(index=0, inplace=True)
+        return True
+
+
+
+    def mk_close_stoch(self, n_row=30):
+        """
+        * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
+        * param
+            なし
+        * return
+            True :bool closeデータ作成成功
+            False:bool closeデータ作成失敗
+            None :bool closeデータが見つからない場合
+        """
+        log.info(f'mk_close_stoch() called') 
+
+        try:
+            stoch_df_tmp = self.stoch_stream_df[self.stoch_stream_df.index.max():self.stoch_stream_df.index.max()+1]
+            if stoch_df_tmp['get_time'].item().second != 59:
+                log.info(f'not found close stoch record')
+                return None
+        except Exception as e:
+            log.error(f'cant get close stoch : [{e}]')
+            return False
+
+        # メンバに登録
+        self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)
+        log.info(f'close stoch data make done')
+#test
+        print('----- stoch -----')
+        print(self.stoch_df)
+        if len(self.stoch_df)  == n_row:self.stoch_df.drop(index=0, inplace=True)
+        return True
+
 
 
     def macd_calculator(self):
