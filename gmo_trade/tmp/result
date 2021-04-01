@@ -1,0 +1,117 @@
+----- func1 called -----
+--- func1 x=10 y=2 ---
+- func1 -- 0 -
+- func1 -- sleep start 2 sec-
+----- func2 called -----
+--- func2 x=5 y=3 ---
+- func2 -- 0 -
+- func2 -- sleep start 3 sec-
+----- while_forever called -----
+--- while_forever x=1 ---
+- while_forever -- sleep start 1 sec-
+----- err_func called -----
+--- err_func x=5 y=3 ---
+- err_func -- 5 -
+- err_func -- sleep start 3 sec-
+- err_func y/i = 0.6 -
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 1 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func2 -- sleep end 3 sec-
+- func2 -- 1 -
+- func2 -- sleep start 3 sec-
+- err_func -- sleep end 3 sec-
+- err_func -- 4 -
+- err_func -- sleep start 3 sec-
+- err_func y/i = 0.75 -
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 2 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func2 -- sleep end 3 sec-
+- func2 -- 2 -
+- func2 -- sleep start 3 sec-
+- err_func -- sleep end 3 sec-
+- err_func -- 3 -
+- err_func -- sleep start 3 sec-
+- err_func y/i = 1.0 -
+- func1 -- sleep end 2 sec-
+- func1 -- 3 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 4 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func2 -- sleep end 3 sec-
+- func2 -- 3 -
+- func2 -- sleep start 3 sec-
+- err_func -- sleep end 3 sec-
+- err_func -- 2 -
+- err_func -- sleep start 3 sec-
+- err_func y/i = 1.5 -
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 5 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func2 -- sleep end 3 sec-
+- func2 -- 4 -
+- func2 -- sleep start 3 sec-
+- err_func -- sleep end 3 sec-
+- err_func -- 1 -
+- err_func -- sleep start 3 sec-
+- err_func y/i = 3.0 -
+- func1 -- sleep end 2 sec-
+- func1 -- 6 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 7 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func2 -- sleep end 3 sec-
+----- func2 end -----
+- err_func -- sleep end 3 sec-
+- err_func -- 0 -
+- err_func -- sleep start 3 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 8 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+- func1 -- 9 -
+- func1 -- sleep start 2 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- while_forever -- sleep end 1 sec-
+- while_forever -- sleep start 1 sec-
+- func1 -- sleep end 2 sec-
+----- func1 end -----
+result is [hello world]
