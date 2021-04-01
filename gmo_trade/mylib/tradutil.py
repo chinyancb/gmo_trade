@@ -1,11 +1,9 @@
-from multiprocessing import Process
 import os
 import sys
 import glob
 import re
-import traceback
 import logging
-from logging import config
+from pathlib import Path
 import itertools
 import requests
 import websocket
@@ -19,13 +17,19 @@ import dateutil.parser
 import pandas as pd
 import numpy as np
 import numexpr
-from pyti.moving_average_convergence_divergence import moving_average_convergence_divergence as macd
-from pyti.exponential_moving_average import exponential_moving_average as ema
+#from pyti.moving_average_convergence_divergence import moving_average_convergence_divergence as macd
+#from pyti.exponential_moving_average import exponential_moving_average as ema
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import chromedriver_binary
 from  mylib.lineutil import LineUtil
 #from  mylib.websocketutil import WebSocketUtil
+
+#------------------------------
+# アプリケーションのパスを指定
+#------------------------------
+app_home = str(Path(__file__).parents[1])
+sys.path.append(app_home)
 
 #---------------------
 # 定数
@@ -38,10 +42,10 @@ WEBSOCKET_ENDPOINT = 'wss://api.coin.z.com/ws/public/v1'
 
 
 # データ出力先パス
-CLOSE_RATE_FILE_PATH = '/Users/chinyancb/Documents/workspace/pj/gmo/gmo_coin_v0.2/gmo_trade/gmo_trade/var/share/close/' # closeレート情報
-MACD_FILE_PATH       = '/Users/chinyancb/Documents/workspace/pj/gmo/gmo_coin_v0.2/gmo_trade/gmo_trade/var/share/macd/'  # MACD計算結果
-POSITION_FILE_PATH   = '/Users/chinyancb/Documents/workspace/pj/gmo/gmo_coin_v0.2/gmo_trade/gmo_trade/var/share/pos/'   # ポジション判定結果
-SYSCONTROL           = '/Users/chinyancb/Documents/workspace/pj/gmo/gmo_coin_v0.2/gmo_trade/gmo_trade/var/share/sysc/'   # システムコントロール用
+CLOSE_RATE_FILE_PATH = app_home + '/var/share/close/' # closeレート情報
+MACD_FILE_PATH       = app_home + '/var/share/macd/'  # MACD計算結果
+POSITION_FILE_PATH   = app_home + '/var/share/pos/'   # ポジション判定結果
+SYSCONTROL           = app_home + '/var/share/sysc/'   # システムコントロール用
 
 
 # システムコントロール用ファイル名
@@ -52,9 +56,9 @@ STOP_NEW_TRADE = 'stop_new_trade'     # 新規エントリーを停止する
 JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST') 
 
 # ロギング
-LOG_CONF = '/Users/chinyancb/Documents/workspace/pj/gmo/gmo_coin_v0.2/gmo_trade/gmo_trade/etc/conf/logging.conf'
-config.fileConfig(LOG_CONF)
-logging.getLogger('macdtrader_util_log').setLevel(logging.DEBUG)
+LOG_CONF = app_home + '/etc/conf/logging.conf'
+logging.config.fileConfig(LOG_CONF)
+logger = logging.getLogger('tradeUtil')
 
 
 
@@ -77,7 +81,7 @@ class MacdScrapGetError(Exception):
     pass
 
 
-class MacdTradUltil(object):
+class TradUltil(object):
 
     def __init__(self): 
 
@@ -106,10 +110,10 @@ class MacdTradUltil(object):
         return:
             True
         """
-        logging.info('init_memb() called')
+        logger.info('init_memb() called')
         self.__init__()
         self.line.send_line_notify('メンバを初期化しました')
-        logging.info('init_memb() done')
+        logger.info('init_memb() done')
         return True
 
 
@@ -123,18 +127,18 @@ class MacdTradUltil(object):
             True :初期化成功
             False:初期化失敗
         """
-        logging.info(f'init_position() called')
+        logger.info(f'init_position() called')
         try:
             pos_jdg_tmp_df = pd.DataFrame([{'main_pos':'STAY','sup_pos':'STAY',
                 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
         except Exception as e:
-            logging.critical(f'ポジションの初期化に失敗しました : [{e}]')
+            logger.critical(f'ポジションの初期化に失敗しました : [{e}]')
             return False
 
         self.pos_jdg_df = pos_jdg_tmp_df.copy()
         del(pos_jdg_tmp_df)
 
-        logging.info(f'position data is init done.')
+        logger.info(f'position data is init done.')
         return True
 
 
@@ -150,25 +154,25 @@ class MacdTradUltil(object):
             True : ファイル作成成功
             False: ファイル作成失敗
         """
-        logging.info(f'make_file() called')
-        logging.info(f'emptiness : [{path + filename}]')
+        logger.info(f'make_file() called')
+        logger.info(f'emptiness : [{path + filename}]')
             
         # ディレクトリ存在チェック。無ければ作成
         tmp_dir_list  = path.split('/')
         tmp_dir = '/'.join([str(i) for i in tmp_dir_list[0:-1]])
         if os.path.isdir(tmp_dir) == False:
             os.makedirs(tmp_dir, exist_ok=True)
-            logging.info(f'maked dir : [{tmp_dir}]')
+            logger.info(f'maked dir : [{tmp_dir}]')
 
         # 空ファイル作成
         try:
             with open(path + filename, mode=mode):
                 pass
         except Exception as e:
-            logging.error(f'cant make emptiness file. : [{e}]')
+            logger.error(f'cant make emptiness file. : [{e}]')
             return False
 
-        logging.info(f'emptiness file make done.[{path + filename}]')
+        logger.info(f'emptiness file make done.[{path + filename}]')
         return True
 
 
@@ -185,20 +189,20 @@ class MacdTradUltil(object):
             False:bool削除失敗
             None:bool ファイルが存在しない or ディレクトリが存在しない
        """ 
-        logging.info(f'rm_file() called.')
+        logger.info(f'rm_file() called.')
         
         # ファイルが存在しない場合
         if selt.is_exit_file(path, filename):
-            logging.info(f'not found remove file : [{path + filename}]')
+            logger.info(f'not found remove file : [{path + filename}]')
             return None
 
         try:
             os.remove(path + filename)
         except Exception as e:
-            logging.error(f'remove file failure : [{e}]')
+            logger.error(f'remove file failure : [{e}]')
 
-        logging.info(f'remove file done : [{path + filename}]')
-        logging.info(f'rm_file() done')
+        logger.info(f'remove file done : [{path + filename}]')
+        logger.info(f'rm_file() done')
         return True
 
 
@@ -214,16 +218,16 @@ class MacdTradUltil(object):
             True :bool ファイルが存在する場合
             False:book ファイルが存在しない場合
         """
-        logging.info(f'is_exit_file() called')
+        logger.info(f'is_exit_file() called')
 
         if os.path.exists(path + filename):
-            logging.info(f'file is exists. : [{path + filename}]')
-            logging.info(f'is_exit_file is done')
+            logger.info(f'file is exists. : [{path + filename}]')
+            logger.info(f'is_exit_file is done')
 
             return True
 
-        logging.info(f'file not found : [{path + filename}]')
-        logging.info(f'is_exit_file() done')
+        logger.info(f'file not found : [{path + filename}]')
+        logger.info(f'is_exit_file() done')
 
         return False
 
@@ -243,16 +247,16 @@ class MacdTradUltil(object):
             cant_get_file:srt ファイル名取得に失敗した場合
         """
 
-        logging.info(f'_get_file_name() called')
+        logger.info(f'_get_file_name() called')
 
         # ディレクトリ存在チェック
         if os.path.exists(path) == False:
-            logging.info(f'not found dir : [{path}]')
+            logger.info(f'not found dir : [{path}]')
             return 'not_found_dir'
 
         # prefixにあたるファイル名があるか確認
         if len(glob.glob(f'{path}{prefix}*')) == 0:
-            logging.info(f'not found file : [{path}{prefix}]')
+            logger.info(f'not found file : [{path}{prefix}]')
             return 'not_found_file'
 
         # ファイル名取得
@@ -260,13 +264,13 @@ class MacdTradUltil(object):
             files = glob.glob(f"{path}{prefix}*")
             filename = max(files, key=os.path.getctime)
         except OSError as e:
-            logging.critical(f'cant get file name : [{e}]')
+            logger.critical(f'cant get file name : [{e}]')
             return 'cant_get_file'
 
         # ファイル名が絶対パスなのでファイル名単体にする
         filename = filename.split('/')[-1]
-        logging.info(f'get file : [{filename}]')    
-        logging.info(f'_get_file_name() done')
+        logger.info(f'get file : [{filename}]')    
+        logger.info(f'_get_file_name() done')
 
         return filename 
 
@@ -282,34 +286,34 @@ class MacdTradUltil(object):
             False:ロードに失敗
             None :posデータファイルが無い場合
         """
-        logging.info(f'load_pos_df() called')
+        logger.info(f'load_pos_df() called')
 
         # posファイルが無い場合
         if len(glob.glob(f'{POSITION_FILE_PATH}pos*')) == 0: 
-            logging.error(f'not found pos data file. under path : [{POSITION_FILE_PATH}]')
+            logger.error(f'not found pos data file. under path : [{POSITION_FILE_PATH}]')
             return None
 
         try:
             files = glob.glob(f"{POSITION_FILE_PATH}pos*")
             latest_file = max(files, key=os.path.getctime)
         except OSError as e:
-            logging.critical(f'reload pos data error: [{e}]')
+            logger.critical(f'reload pos data error: [{e}]')
             return False
 
         # ポジションファイル読み込み
         try:
             latest_file = latest_file.split('/')[-1]
-            logging.info(f'load file : [{latest_file}]')
+            logger.info(f'load file : [{latest_file}]')
             pos_df = pd.read_csv(filepath_or_buffer=POSITION_FILE_PATH + latest_file, sep=',', header=0)
-            logging.info(f'csv file read done')
+            logger.info(f'csv file read done')
     
             # 先頭行を読み込み
             pos_df = pos_df.head(n=head_nrow).reset_index(level=0, drop=True)
-            logging.info(f'reset index done') 
+            logger.info(f'reset index done') 
     
             # 文字列からint、datetime型に変換
             pos_df['close_rate'] = pos_df['close_rate'].astype('int')
-            logging.info('close_rate dtype convert done.')
+            logger.info('close_rate dtype convert done.')
     
             # ポジション判定時刻の変換(そのまま読み込んで大丈夫）
             jdg_timestamp_list = []
@@ -319,18 +323,18 @@ class MacdTradUltil(object):
             else:
                 pos_df['jdg_timestamp'] = jdg_timestamp_list 
         except Exception as e:
-            logging.error(f'position data load failure : [{POSITION_FILE_PATH + latest_file}, {e}]')
+            logger.error(f'position data load failure : [{POSITION_FILE_PATH + latest_file}, {e}]')
             return False
 
         # 読み込んだファイルは時系列で降順となっているため昇順に変更
         pos_df = pos_df.sort_values(by ='jdg_timestamp', ascending=True).reset_index(level=0, drop=True)
-        logging.info('jdg_timestamp dtype convert done.')
+        logger.info('jdg_timestamp dtype convert done.')
 
         # メンバとしてコピー
         self.pos_jdg_df = pos_df.copy()
         del(pos_df)
 
-        logging.info(f'pos data load success.')
+        logger.info(f'pos data load success.')
         return True 
 
 
@@ -353,13 +357,13 @@ class MacdTradUltil(object):
             False  書き出し失敗
         """
 
-        logging.info('_write_csv_dataframe() called.')
+        logger.info('_write_csv_dataframe() called.')
         # ディレクトリ存在チェック。無ければ作成
         tmp_dir_list  = path.split('/')
         tmp_dir = '/'.join([str(i) for i in tmp_dir_list[0:-1]])
         if os.path.isdir(tmp_dir) == False:
             os.makedirs(tmp_dir, exist_ok=True)
-            logging.info(f'maked dir : [{tmp_dir}]')
+            logger.info(f'maked dir : [{tmp_dir}]')
 
         # ソート
         try:
@@ -371,19 +375,19 @@ class MacdTradUltil(object):
                 # 降順
                 df_tmp = df_tmp.sort_values(by=key, ascending=False)
         except KeyError as e:
-            logging.error(f'not found key for sort : [{e}]')
-            logging.error(f'_write_csv_dataframe() cancelled.')
+            logger.error(f'not found key for sort : [{e}]')
+            logger.error(f'_write_csv_dataframe() cancelled.')
             return False
         except Exception as e:
-            logging.error(f'_write_csv_dataframe() cancelled.')
+            logger.error(f'_write_csv_dataframe() cancelled.')
             return False 
 
         # header有り
         if df_tmp.to_csv(path_or_buf=path, sep=sep, index=index, mode=mode, header=header) == None:
-            logging.info(f'write dataframe to csv done. : [{path}]')
+            logger.info(f'write dataframe to csv done. : [{path}]')
             del(df_tmp)
             return True
-        logging.error(f'write dataframe to csv failure. : [{path}]')
+        logger.error(f'write dataframe to csv failure. : [{path}]')
         del(df_tmp)
         return False
 
@@ -399,7 +403,7 @@ class MacdTradUltil(object):
         * Exception : ExchangStatusGetError
         """
         
-        logging.info(f'_get_exchg_status() called')
+        logger.info(f'_get_exchg_status() called')
         path = '/v1/status'
         url  = PUBLIC_ENDPOINT + path
 
@@ -412,15 +416,15 @@ class MacdTradUltil(object):
                 response = requests.get(url)
                 response.raise_for_status() # HTTPステータスコードが200番台以外であれば例外を発生させる
             except requests.exceptions.RequestException as e:
-                logging.critical(f"http status code error : [{e}]")
+                logger.critical(f"http status code error : [{e}]")
         
                 # リトライ
                 err_htp_cnt += 1
                 if err_htp_cnt <= 10:
-                    logging.critical(f"http request error. exec retry: [{e}]")
+                    logger.critical(f"http request error. exec retry: [{e}]")
                     time.sleep(retry_sleep_sec)
                     continue
-                logging.critical(f"http request error. process kill {e}")
+                logger.critical(f"http request error. process kill {e}")
                 #sys.exit(1)
                 raise ExchangStatusGetError(f'HTTPエラーにより取引所ステータスが取得できません')
 
@@ -431,13 +435,13 @@ class MacdTradUltil(object):
             try:
                 exchg_stat = json.loads(exchg_status_js)['data']['status']
             except Exception as e:
-                logging.error(f'不正なレスポンスです. : [{e}]')
+                logger.error(f'不正なレスポンスです. : [{e}]')
                 raise ExchangStatusGetError(exchg_stat)
             except ExchangStatusGetError as e:
-                logging.error(f"取引所ステータスを取得できませんでした:[{e}]")
+                logger.error(f"取引所ステータスを取得できませんでした:[{e}]")
             break
 
-        logging.info(f'_get_exchg_status() is done')
+        logger.info(f'_get_exchg_status() is done')
         return exchg_stat
 
     
@@ -452,7 +456,7 @@ class MacdTradUltil(object):
             last_rate:int 最新のレート(※レートの取得に失敗は-1を返す)
         """
 
-        logging.info(f'_get_rate() called')
+        logger.info(f'_get_rate() called')
 
         path = f'/v1/ticker?symbol={symbol}'
         url = PUBLIC_ENDPOINT + path
@@ -460,23 +464,23 @@ class MacdTradUltil(object):
             response = requests.get(url)
             response.raise_for_status
         except requests.exceptions.RequestException as e:
-            logging.critical(f"http status code error : [{e}]")
+            logger.critical(f"http status code error : [{e}]")
             return -1
 
         try:
             response_json = json.dumps(response.json())
         except Exception as e:
-            logging.error(f'response convert json failure : [{e}]')
+            logger.error(f'response convert json failure : [{e}]')
             return -1 
 
         # レスポンスのステータスが0以外であれば失敗
         if json.loads(response_json)['status'] != 0:
-            logging.error(f'respons status invalid : [{response_json}]')
+            logger.error(f'respons status invalid : [{response_json}]')
             return -1
 
         last_rate = int(json.loads(response_json)['data'][0]['last'])
         if last_rate:
-            logging.info(f'_get_rate() done')
+            logger.info(f'_get_rate() done')
             return last_rate
         else:
             return -1
@@ -494,21 +498,21 @@ class MacdTradUltil(object):
         # CLOSEデータ取得
         #----------------------------
 
-        logging.info(f'_get_close_info() is called')
+        logger.info(f'_get_close_info() is called')
         # 取引所ステータス確認
         try:
             exchg_stat = self._get_exchg_status() 
             if exchg_stat != 'OPEN':
                 time.sleep(retry_sleep_sec)
-                logging.info(f'取引所がOPENではありません。メンバを初期化します: [{exchg_stat}]')
+                logger.info(f'取引所がOPENではありません。メンバを初期化します: [{exchg_stat}]')
                 raise ExchangStatusGetError(exchg_stat)
         except ExchangStatusGetError as e:
-            logging.critical(f'取引所がOPENではありません。メンバを初期化します  : [{e}]')
+            logger.critical(f'取引所がOPENではありません。メンバを初期化します  : [{e}]')
             self.init_memb()
          
         path = f"/v1/trades?symbol={symbol}&page={page}&count={count}"
         url  = PUBLIC_ENDPOINT + path
-        logging.info(f"URL : [{url}]")
+        logger.info(f"URL : [{url}]")
 
         # イテレーター
         err_htp_cnt = 0 # closeデータHTTPリクエスト失敗カウンター
@@ -519,16 +523,16 @@ class MacdTradUltil(object):
                 response = requests.get(url)
                 response.raise_for_status() # HTTPステータスコードが200番台以外であれば例外を発生させる
             except requests.exceptions.RequestException as e:
-                logging.critical(f"{e}")
+                logger.critical(f"{e}")
         
                 # リトライ
                 err_htp_cnt += 1
                 if err_htp_cnt <= 10:
-                    logging.critical(f"http request error. exec retry : [{e}]")
+                    logger.critical(f"http request error. exec retry : [{e}]")
                     time.sleep(retry_sleep_sec)
                     continue
 
-                logging.critical(f'HTTPエラーによりclose情報が取得できません. プロセスを終了します.  : [{e}]')
+                logger.critical(f'HTTPエラーによりclose情報が取得できません. プロセスを終了します.  : [{e}]')
                 #sys.exit(1)
                 raise CloseRateGetError(f'HTTPエラーによりclose情報が取得できません')
         
@@ -540,12 +544,12 @@ class MacdTradUltil(object):
             if json.loads(rate_info_js)['status'] != 0:
                 err_cnt += 1
                 time.sleep(retry_sleep_sec)
-                logging.error(f"status code invalid : [{json.loads(rate_info_js)}]")
+                logger.error(f"status code invalid : [{json.loads(rate_info_js)}]")
                 continue
 
                 # 3回失敗するとエラー判定
                 if err_cnt == 3:
-                    logging.critical(f"不正なレスポンスです。プロセスを終了します : [{json.loads(rate_info_js)}]")
+                    logger.critical(f"不正なレスポンスです。プロセスを終了します : [{json.loads(rate_info_js)}]")
                     #sys.exit(1)
         
             # データの個数を取得
@@ -557,7 +561,7 @@ class MacdTradUltil(object):
                 close_timestamp_jst = dateutil.parser.parse(close_timestamp_tmp).astimezone(JST)
                 close_rate_tmp = int(json.loads(rate_info_js)['data']['list'][i]['price'])
             
-                logging.debug(f"cls_mt : [{cls_mt}] close_timestamp_jst.minute:[{close_timestamp_jst.minute}]")
+                logger.debug(f"cls_mt : [{cls_mt}] close_timestamp_jst.minute:[{close_timestamp_jst.minute}]")
                 # 分が同じ場合
                 if cls_mt == close_timestamp_jst.minute:
                     close_timestamp = close_timestamp_jst
@@ -567,13 +571,13 @@ class MacdTradUltil(object):
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                 # 100カウントで取得できない場合は現在時刻,レートは-1を返す(暫定対応)
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                logging.warning(f'not found close rate in 100 length js.')
+                logger.warning(f'not found close rate in 100 length js.')
                 close_timestamp = datetime.datetime.now(tz=JST) + datetime.timedelta(seconds=120)
                 return {'close_timestamp' : close_timestamp, 'close_rate' : -1}        
 
             break # while文を抜ける
             #--------------- while文ここまで -----------------#
-        logging.info(f'_get_close_info() is done')
+        logger.info(f'_get_close_info() is done')
         return {'close_timestamp' : close_timestamp, 'close_rate' : close_rate}        
             
 
@@ -593,7 +597,7 @@ class MacdTradUltil(object):
         # 1分足のclose情報を取得(メイン処理)
         #=================================================
 
-        logging.info(f'get_close_info() called')
+        logger.info(f'get_close_info() called')
 
         while True:
 
@@ -610,7 +614,7 @@ class MacdTradUltil(object):
                 time.sleep(1.5)
 
                 # 1分前のcloseデータを取得
-                logging.debug(f"cls_tm : {cls_tm}")
+                logger.debug(f"cls_tm : {cls_tm}")
                 close_dict = self._get_close_info(cls_tm.minute)
 
                 # 最新のcloseの時刻(分)を取得
@@ -619,23 +623,23 @@ class MacdTradUltil(object):
 
                     # close_rateが-1に場合はリトライ
                     if close_dict['close_rate'] == -1:
-                        logging.warning(f"not found close data : [{close_dict['close_rate']}]")
-                        logging.info(f'retry func[_get_close_info()]')
+                        logger.warning(f"not found close data : [{close_dict['close_rate']}]")
+                        logger.info(f'retry func[_get_close_info()]')
                         
                         for _ in np.arange(1, 10):
                             time.sleep(retry_sleep_sec)
                             close_dict = self._get_close_info(cls_tm.minute, page=_)
                             if ((last_close_rate_minute + 1) == close_dict['close_timestamp'].minute) and (close_dict['close_rate'] != -1):
-                                logging.info(f'retry is success')
+                                logger.info(f'retry is success')
                                 break
                         else:
-                            logging.info(f'not found close data. raise exception')
+                            logger.info(f'not found close data. raise exception')
                             raise CloseRateGetError(f'not found close data')
                             return False
 
                 # たまたま初回にclose_rateが-1で最初からやり直し
                 if close_dict['close_rate'] == -1:
-                    logging.error(f"error: cant get close data : [{close_dict['close_rate']}]")
+                    logger.error(f"error: cant get close data : [{close_dict['close_rate']}]")
                     continue
 
                 # データフレームを作成
@@ -647,7 +651,7 @@ class MacdTradUltil(object):
                 self.close_rate_df = pd.concat([self.close_rate_df, close_rate_tmp_df], ignore_index=True).sort_values(by="close_timestamp", axis=0)
 
                 # 1分毎にcloseレートが取れているか確認
-                logging.info(f"'check self.close_rate_df'")
+                logger.info(f"'check self.close_rate_df'")
                 for i in range(0, len(self.close_rate_df)):
                     if i == 0:
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
@@ -658,13 +662,13 @@ class MacdTradUltil(object):
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
                         continue 
                     elif (tmp_close_tm + 1) !=  self.close_rate_df['close_timestamp'][i].minute:
-                        logging.error(f"'self.close_rate_df' is  invalid. メンバを初期化します:[{self.close_rate_df.query('index==@i')}]")
+                        logger.error(f"'self.close_rate_df' is  invalid. メンバを初期化します:[{self.close_rate_df.query('index==@i')}]")
                         self.init_memb() 
                         break
                     else:
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
                 else:
-                    logging.info(f"'self.close_rate_df' is ok")
+                    logger.info(f"'self.close_rate_df' is ok")
 
                 # 1分毎にデータが取得できていない場合
                 if len(self.close_rate_df) == 0:
@@ -679,7 +683,7 @@ class MacdTradUltil(object):
 
                 # MACD計算
                 self.macd_calculator()
-                logging.info('get_close_info() 1cycle done')
+                logger.info('get_close_info() 1cycle done')
     
 
 
@@ -714,7 +718,7 @@ class MacdTradUltil(object):
 #            self.tmp_close_rate_df = pd.concat([self.tmp_close_rate_df, tmp_df], ignore_index=True)
 
         def on_error(self, err):
-            logging.critical(f'websocket api failed : [{errr}]')
+            logger.critical(f'websocket api failed : [{errr}]')
 
         ws.on_open = on_open
         ws.on_message = on_message
@@ -743,7 +747,7 @@ class MacdTradUltil(object):
                 self.stoch_dfに取得時刻,%K, %Dの値を格納
             取得失敗: 例外を発生させる
         """
-        logging.info(f'scrap_macd_stoch() called')
+        logger.info(f'scrap_macd_stoch() called')
 
         # ヘッドレスブラウザでtradingviewのURLを開く
         try:
@@ -756,10 +760,10 @@ class MacdTradUltil(object):
             time.sleep(10)
         except Exception as e:
             driver.quit()
-            logging.critical(f'cant open headless browser : [{e}]')
+            logger.critical(f'cant open headless browser : [{e}]')
             raise MacdScrapGetError(f'cant open headless browser : [{e}]')
 
-        logging.info(f'headless browser opend')
+        logger.info(f'headless browser opend')
 
         # macd関連のデータ取得
         while True:
@@ -767,17 +771,17 @@ class MacdTradUltil(object):
                 # CSSセレクタで指定のクラスでelementを取得
                 ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
                 get_time = datetime.datetime.now(tz=JST)
-                logging.info(f'got elements :[{ind_array}]')
+                logger.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
                 macd_array  = ind_array[1].text.replace('−', '-').split('\n')
                 stoch_array = ind_array[2].text.split('\n')
-                logging.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
+                logger.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 文字列を数値へ変換
                 macd_array  = [int(data) for data in macd_array]
                 stoch_array = [float(data) for data in stoch_array]
-                logging.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
+                logger.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 取得時刻をリストに追加
                 macd_array.append(get_time)
@@ -787,7 +791,7 @@ class MacdTradUltil(object):
                 macd_array  = np.array(macd_array) 
                 stoch_array = np.array(stoch_array)
             except Exception as e:
-                logging.critical(f'cant get macd data : [{e}]')
+                logger.critical(f'cant get macd data : [{e}]')
                 driver.quit()
                 raise MacdScrapGetError(f'cant open headless browser : [{e}]')
 
@@ -797,13 +801,13 @@ class MacdTradUltil(object):
             stoch_df_tmp = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD','get_time'])   
             self.macd_df  = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
             self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)   
-            logging.info(f'memb registed done')
+            logger.info(f'memb registed done')
 
             del(macd_df_tmp)
             del(stoch_df_tmp)
 
             time.sleep(sleep_sec)
-            logging.info(f'scraping 1cycle done')
+            logger.info(f'scraping 1cycle done')
 
 # test
             print('----- macd -----')
@@ -824,11 +828,11 @@ class MacdTradUltil(object):
             True : MACDを計算しpositioner()を実行した場合
             False: MACDを計算しpositioner()を実行しなかった場合
         ''' 
-        logging.info('macd_calculator() called')
+        logger.info('macd_calculator() called')
 
         # closeレートが26個無いと計算できないためNoneを返す
         if len(self.close_rate_df) < 26: 
-            logging.info(f'close data not enough : [{len(self.close_rate_df)}]')
+            logger.info(f'close data not enough : [{len(self.close_rate_df)}]')
             return None
 
         # closeの情報をコピー
@@ -841,7 +845,7 @@ class MacdTradUltil(object):
         macd_period = {'long' : 26, 'short' : 12}
         signal_period = 9
         macd_tmp_df["macd"] = macd(macd_tmp_df["close_rate"].values.tolist(),  macd_period['short'], macd_period['long'])
-        logging.info(f"macd calculated : [{macd_tmp_df['macd'].tail(n=1)}]")
+        logger.info(f"macd calculated : [{macd_tmp_df['macd'].tail(n=1)}]")
 
         # Pytiの仕様により初回のmacdの計算結果は一つとなる
         macd_tmp_df = pd.concat([self.macd_df, macd_tmp_df.tail(n=1)])
@@ -857,7 +861,7 @@ class MacdTradUltil(object):
         if len(macd_tmp_df["macd"]) >= 9:
             macd_tmp_df["signal"] = ema(macd_tmp_df["macd"].values.tolist(), signal_period)
             macd_tmp_df["hist"]   = macd_tmp_df["macd"] - macd_tmp_df["signal"]
-            logging.info(f"signal  : [{macd_tmp_df['signal'].tail(n=1)}] - hist :[{macd_tmp_df['hist'].tail(n=1)}]")
+            logger.info(f"signal  : [{macd_tmp_df['signal'].tail(n=1)}] - hist :[{macd_tmp_df['hist'].tail(n=1)}]")
 
         self.macd_df = macd_tmp_df.reset_index(level=0, drop=True)
 
@@ -880,7 +884,7 @@ class MacdTradUltil(object):
         filename = self._get_file_name(path=SYSCONTROL, prefix='hist') 
         if re.search('^hist_', filename):
             hist_manual = int(filename.split('_')[-1])
-            logging.info(f'hist_thresh is changed at manual. hist_thresh : [{hist_manual}]')
+            logger.info(f'hist_thresh is changed at manual. hist_thresh : [{hist_manual}]')
             self.positioner(hist_thresh=hist_manual)
 #        else:
 #            # デフォルトのヒストグラムの閾値で実行
@@ -890,7 +894,7 @@ class MacdTradUltil(object):
 #        if len(self.macd_df)       > 26: self.macd_df.drop(index=0, inplace=True)
 #        if len(self.close_rate_df) > 26: self.close_rate_df.drop(index=0, inplace=True)
 #
-#        logging.info(f'macd_calculator() done')
+#        logger.info(f'macd_calculator() done')
 
         return True
 
@@ -917,19 +921,19 @@ class MacdTradUltil(object):
             None:bool ポジション判定を行わない場合
         """
 
-        logging.info(f'positioner() called')
+        logger.info(f'positioner() called')
         #-----------------------------------------------------------------------------------------
         # ※ Pytiの仕様によりcloseのデータが26個で初めて計算されるため、macdが計算されても
         # macdが9個ないとシグナル、ヒストグラムが計算されない
         # シグナル、ヒストグラムも3個必要であるため、MACDの個数が11個必要。11個なければNoneを返す
         #-----------------------------------------------------------------------------------------
         if self.macd_df.count()['macd'] < 11:
-            logging.info(f"macd data not enough  : [{self.macd_df.count()['macd']}]")
+            logger.info(f"macd data not enough  : [{self.macd_df.count()['macd']}]")
             return None 
 
         # ポジション判定停止が出ている場合はポジション判定を行わない
         if self.is_exit_file(SYSCONTROL, INIT_POSITION):
-            logging.info(f'init Judgment position file exists. : [{SYSCONTROL + INIT_POSITION}]')
+            logger.info(f'init Judgment position file exists. : [{SYSCONTROL + INIT_POSITION}]')
             self.init_position()
             return None
 
@@ -945,12 +949,12 @@ class MacdTradUltil(object):
         #-----------------------------------------------------------------------------------------
         if self.is_div == True:
             if self.init_position():
-                logging.info(f"Divergence occur! all position STAY. self.pos_jdg_df: [{self.pos_jdg_df}]")
+                logger.info(f"Divergence occur! all position STAY. self.pos_jdg_df: [{self.pos_jdg_df}]")
                 return None    
 
         # MACDの値が閾値を超えていないと判定しない
         if ((macd_tmp_df['macd'] >= macd_thresh).all() == False) and ((macd_tmp_df['macd'] <= -macd_thresh).all() == False):
-            logging.info(f"macd not satisfy :[{macd_tmp_df['macd']}]")
+            logger.info(f"macd not satisfy :[{macd_tmp_df['macd']}]")
             return None
 
         # ヒストグラム
@@ -992,7 +996,7 @@ class MacdTradUltil(object):
                 pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
                 pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
                 self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-                logging.info(f"pattern 11 position : [{self.pos_jdg_df.tail(n=1)}]")
+                logger.info(f"pattern 11 position : [{self.pos_jdg_df.tail(n=1)}]")
 
         # SHORT目線(SHORT間近)
         elif (macd_tmp_df['macd'] >= macd_thresh).all():
@@ -1003,7 +1007,7 @@ class MacdTradUltil(object):
                 pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
                 pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
                 self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-                logging.info(f"pattern 12 position : [{self.pos_jdg_df.tail(n=1)}]")
+                logger.info(f"pattern 12 position : [{self.pos_jdg_df.tail(n=1)}]")
 
 #        #------------------------------------------------------------------------------
 #        # パターン2 ヒストグラムが閾値を超えてないが、MACDが大きく振れGX、DX間近の場合
@@ -1018,7 +1022,7 @@ class MacdTradUltil(object):
 #                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
 #                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
 #                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-#                logging.info(f"pattern 21 position : [{self.pos_jdg_df.tail(n=1)}]")
+#                logger.info(f"pattern 21 position : [{self.pos_jdg_df.tail(n=1)}]")
 #
 #        # SHORT目線(DX間近)
 #        elif (macd_tmp_df['macd'] > 8000).all():
@@ -1029,7 +1033,7 @@ class MacdTradUltil(object):
 #                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
 #                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
 #                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-#                logging.info(f"pattern 22 position : [{self.pos_jdg_df.tail(n=1)}]")
+#                logger.info(f"pattern 22 position : [{self.pos_jdg_df.tail(n=1)}]")
 #
 #        #--------------------------------------------------
 #        # パターン3 MACDがシグナル上で反発した場合(一旦やめ
@@ -1045,7 +1049,7 @@ class MacdTradUltil(object):
             pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
             pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
             self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-            logging.info(f"pattern none position : [{self.pos_jdg_df.tail(n=1)}]")
+            logger.info(f"pattern none position : [{self.pos_jdg_df.tail(n=1)}]")
         
         # ファイル出力(時系列的に最新を優先しているの降順で出力)
         self._write_csv_dataframe(self.pos_jdg_df, path=POSITION_FILE_PATH + self.pos_filename, ascending=False, key='jdg_timestamp')
@@ -1054,7 +1058,7 @@ class MacdTradUltil(object):
         print(self.pos_jdg_df)
         print('---------- pos ----------')
         if len(self.pos_jdg_df) > n_row: self.pos_jdg_df.drop(index=n_row, inplace=True)
-        logging.info(f'positioner() done')
+        logger.info(f'positioner() done')
         return True
 
 
@@ -1069,7 +1073,7 @@ class MacdTradUltil(object):
                               あるいは成行で損切りする場合もある
                               （保有しているポジションとは逆のポジションがpositionerから指示が出た場合など)
         """
-        logging.info('trader() called')
+        logger.info('trader() called')
         timestamp = datetime.datetime.now(tz=JST)
         while True:
             self.load_pos_df() # ロードするタイミングでタイムスタンプはJSTで設定されているため変換する必要無し
