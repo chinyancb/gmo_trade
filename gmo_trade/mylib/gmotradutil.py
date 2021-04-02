@@ -87,7 +87,7 @@ class MacdStochScrapGetError(Exception):
     pass
 
 
-class TradUltil(object):
+class GmoTradUltil(object):
 
     def __init__(self): 
 
