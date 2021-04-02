@@ -17,13 +17,15 @@ import pytz
 import dateutil.parser
 import pandas as pd
 import numpy as np
+import random
 import numexpr
 #from pyti.moving_average_convergence_divergence import moving_average_convergence_divergence as macd
 #from pyti.exponential_moving_average import exponential_moving_average as ema
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import chromedriver_binary
-from  mylib.lineutil import LineUtil
+from mylib.lineutil import LineUtil
+from mylib.bitfilyertradutil import BitfilyerTradUtil
 #from  mylib.websocketutil import WebSocketUtil
 
 #------------------------------
@@ -64,7 +66,7 @@ JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST')
 # ロギング
 LOG_CONF = app_home + '/etc/conf/logging.conf'
 logging.config.fileConfig(LOG_CONF)
-log = logging.getLogger('tradeUtil')
+log = logging.getLogger('gmotradeUtil')
 
 
 
@@ -87,7 +89,7 @@ class MacdStochScrapGetError(Exception):
     pass
 
 
-class GmoTradUltil(object):
+class GmoTradUtil(object):
 
     def __init__(self): 
 
@@ -207,7 +209,7 @@ class GmoTradUltil(object):
         log.info(f'rm_file() called.')
         
         # ファイルが存在しない場合
-        if selt.is_exit_file(path, filename):
+        if self.is_exit_file(path, filename) == False:
             log.info(f'not found remove file : [{path + filename}]')
             return None
 
@@ -215,6 +217,7 @@ class GmoTradUltil(object):
             os.remove(path + filename)
         except Exception as e:
             log.error(f'remove file failure : [{e}]')
+            return False
 
         log.info(f'remove file done : [{path + filename}]')
         log.info(f'rm_file() done')
@@ -900,6 +903,149 @@ class GmoTradUltil(object):
         del(df)
         log.info(f'mk_close_stoch() done')
         return True
+
+
+
+    def check_cor_gmo_bitflyer(self, cor_thresh=0.65, symbol='BTC_JPY', sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, len_thresh=10):
+        """
+        * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
+        * param
+            cor_thresh:float (default 0.7) 相関係数の閾値。これを下回ると取引停止とさせる
+            symbol:str (default 'BTC_JPY') 対象となる通貨
+            sleep_sec:int (default 5) スリープ秒
+            retry_sleep_sec:int (default 10) リトライ用のスリープ
+            retry_thresh:int (default 3) リトライ回数の閾値。超えるとSTOP_NEW_TRADEファイルを作成
+            len_thresh:int (default 60) レートを保持する個数。超えると古いものから削除する
+        * return
+            無し
+                閾値以上:pass
+                閾値未満:STOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
+                         ※ただし閾値以上に戻ったらSTOP_NEW_TRADE ファイルを削除する
+        """
+        log.info(f'is_cor_gmo_bitflyer() called')
+
+        # ビットフライヤー用のインスタンス作成
+        btu = BitfilyerTradUtil() 
+
+        # レート格納用配列(乱数で初期化※空で作成すると相関係数を計算する時にゼロで割りエラーとなるため)
+        gmo_rate_array = np.array([random.randrange(1,5)])
+        bitflyer_rate_array = np.array([random.randrange(1,5)])
+        
+        # リトライカウント用変数
+        gmo_retry_cnt  = 0
+        bitf_retry_cnt = 0
+
+        # LINE通知カウント用変数
+        line_cnt = 0
+
+        while True:
+
+            while True:
+                # GMO最新レート取得
+                gmo_rate = self._get_rate()
+                if gmo_rate != -1:
+                    break
+
+                # リトライ
+                time.sleep(retry_sleep_sec) 
+                gmo_retry_cnt += 1
+                continue
+
+                # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
+                if gmo_retry_cnt > retry_thresh:
+                    self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
+                    # 配列、リトライカウント初期化
+                    gmo_rate_array = np.array([random.randrange(1,5)])
+                    gmo_retry_cnt  = 0
+                    if line_cnt == 0:
+                        self.line.send_line_notify(f'ビットフライヤーの最新レートを取得できませんでした。\
+                                新規ポジション作成を停止します。')
+                        line_cnt += 1
+                    continue
+
+            # レート格納
+            gmo_rate_array = np.append(gmo_rate_array, int(gmo_rate))
+#test
+            print(f'gmo {gmo_rate_array}')
+            #-------------- GMO ここまで --------------#
+
+            while True:
+                # ビットフライヤーのレート
+                bitflyer_rate = btu.get_ticker()
+                if bitflyer_rate['ltp'] != -1:
+                    break
+
+                # リトライ
+                time.sleep(retry_sleep_sec) 
+                bitf_retry_cnt += 1
+                continue
+
+                # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
+                if bitf_retry_cnt > retry_thresh:
+                    self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) 
+                    # 配列、リトライカウント初期化
+                    bitflyer_rate_array = np.array([random.randrange(1,5)])
+                    bitf_retry_cnt = 0
+                    if line_cnt == 0:
+                        self.line.send_line_notify(f'ビットフライヤーの最新レートを取得できませんでした。\
+                                新規ポジション作成を停止します。')
+                        line_cnt += 1
+                    continue
+
+            # レート格納
+            bitflyer_rate_array = np.append(bitflyer_rate_array, int(bitflyer_rate['ltp']))
+#test
+            print(f'bitf {bitflyer_rate_array}')
+            #-------------- ビットフライヤー ここまで --------------#
+
+            # レートの個数が2つ以上無い計算できないためconitnue
+            if len(gmo_rate_array) < 2 or len(bitflyer_rate_array) < 2: continue
+
+            
+            # 配列の長さが等しく無ければ配列を初期化し再度最新レートを取得する
+            if len(gmo_rate_array) != len(bitflyer_rate_array):
+                gmo_rate_array = np.array([random.randrange(1,5)])
+                bitflyer_rate_array = np.array([random.randrange(1,5)])
+                continue
+
+
+            # 相関係数を計算
+            cor = np.corrcoef(gmo_rate_array, bitflyer_rate_array)[0,1]
+#test
+            print(cor)
+            if cor >= cor_thresh:
+                # ポジション停止ファイルがあった場合は削除する
+                if self.rm_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) == True:
+                    if line_cnt == 1:
+                        self.line.send_line_notify(f'GMOコインとビットフライヤーでトレンドの相関が戻りました。\
+                                新規ポジション作成可能状態に復旧します。\
+                                相関係数:{cor}')
+                        line_cnt = 0
+
+                log.info(f'gmo bitfilyer rate cor ok : [{cor}]')
+
+            # 相関係数が閾値を下回るとSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
+            else:
+                log.critical(f'gmo bitfilyer rate cor NG : [{cor}]')
+                self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)
+                log.critical('stop new trad. make file {STOP_NEW_TRADE}')
+                if line_cnt == 0:
+                    self.line.send_line_notify(f'GMOコインとビットフライヤーでトレンドの相関が崩れました。\
+                            新規ポジションを停止します。\
+                            相関係数:{cor}')
+                    line_cnt += 1
+
+
+            # 配列の長さが閾値を超えると古いものを削除(メモリ削減のため)
+            if len(gmo_rate_array) > len_thresh: gmo_rate_array = np.delete(gmo_rate_array, 0)
+            if len(bitflyer_rate_array) > len_thresh: bitflyer_rate_array = np.delete(bitflyer_rate_array, 0)
+
+            # リトライカウント初期化
+            gmo_retry_cnt  = 0
+            bitf_retry_cnt =0
+
+            time.sleep(sleep_sec)
+            continue
 
 
 
