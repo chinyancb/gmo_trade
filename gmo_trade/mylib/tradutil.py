@@ -43,15 +43,20 @@ WEBSOCKET_ENDPOINT = 'wss://api.coin.z.com/ws/public/v1'
 
 
 # データ出力先パス
-CLOSE_RATE_FILE_PATH = app_home + '/var/share/close/' # closeレート情報
-MACD_FILE_PATH       = app_home + '/var/share/macd/'  # MACD計算結果
-POSITION_FILE_PATH   = app_home + '/var/share/pos/'   # ポジション判定結果
-SYSCONTROL           = app_home + '/var/share/sysc/'   # システムコントロール用
+CLOSE_RATE_FILE_PATH     = app_home + '/var/share/close/'        # closeレート情報
+MACD_FILE_PATH           = app_home + '/var/share/macd/'         # MACD1分CLOSE値(ニアリーイコール)
+MACD_STREAM_FILE_PATH    = app_home + '/var/share/macd_stream/'  # MACD1秒
+STOCH_FILE_PATH          = app_home + '/var/share/stoch/'        # ストキャスティクス1分CLOSE(ニアリーイコール)
+STOCH_STREAM_FILE_PATH   = app_home + '/var/share/stoch_stream/' # ストキャスティクス1秒値
+POSITION_MACD_FILE_PATH  = app_home + '/var/share/pos/macd/'     # MACDによるポジション判定結果
+POSITION_STOCH_FILE_PATH = app_home + '/var/share/pos/stoch/'    # ストキャスティクスよるポジション判定結果
+SYSCONTROL               = app_home + '/var/share/sysc/'         # システムコントロール用
 
 
 # システムコントロール用ファイル名
 INIT_POSITION  = 'init_positioner' # ポジションを初期化する(main_pos=STAYに設定する)
 STOP_NEW_TRADE = 'stop_new_trade'     # 新規エントリーを停止する
+
 
 # JST 変換用定数
 JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST') 
@@ -75,9 +80,9 @@ class CloseRateGetError(Exception):
     """
     pass
 
-class MacdScrapGetError(Exception):
+class MacdStochScrapGetError(Exception):
     """
-    tradingviewからスクレイピングでMACD関連情報を取得できない
+    tradingviewからスクレイピングでMACD,ストキャスティクス関連情報を取得できない
     """
     pass
 
@@ -87,21 +92,24 @@ class TradUltil(object):
     def __init__(self): 
 
         # データ関連
-        self.close_rate_df    = pd.DataFrame()                              # closeレート格納用
-        self.macd_stream_df   = pd.DataFrame()                              # macdリアルタイムデータ格納用
-        self.stoch_stream_df  = pd.DataFrame()                              # ストキャスティクスデータ格納用
-        self.macd_df          = pd.DataFrame()                              # macd確定値データ格納用
-        self.stoch_df         = pd.DataFrame()                              # ストキャスティクス確定値データ格納用
+        self.close_rate_df    = pd.DataFrame()  # closeレート格納用
+        self.macd_stream_df   = pd.DataFrame()  # macdリアルタイムデータ格納用
+        self.stoch_stream_df  = pd.DataFrame()  # ストキャスティクスデータ格納用
+        self.macd_df          = pd.DataFrame()  # macd確定値データ格納用
+        self.stoch_df         = pd.DataFrame()  # ストキャスティクス確定値データ格納用
         self.pos_jdg_df       = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
         self.pos_macd_jdg_df  = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
         self.pos_stoch_jdg_df = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
 
         # ファイル関連
-        self.close_filename = f"close_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}" # closeデータの書き出しファイル名
-        self.macd_filename  = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macdデータの書き出しファイル名
-        self.stock_filename  = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macdデータの書き出しファイル名
-        self.pos_macd_filename   = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"   # ポジションデータの書き出しファイル名
-        self.pos_stoch_filename   = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"   # ポジションデータの書き出しファイル名
+        self.close_filename        = f"close_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
+        self.macd_filename         = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"        # macdデータの書き出しファイル名
+        self.macd_stream_filename  = f"macd_stream{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macd1秒データの書き出しファイル名
+        self.stoch_filename        = f"stoch_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"       # ストキャスティクスデータの書き出しファイル名
+        self.stoch_stream_filename = f"stoch_stream{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}" # ストキャスティクス1秒データの書き出しファイル名
+        self.pos_filename          = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # ポジションデータの書き出しファイル名
+        self.pos_macd_filename     = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # macdによるポジションデータの書き出しファイル名
+        self.pos_stoch_filename    = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # ストキャスティクスによるポジションデータの書き出しファイル名
 
         # フラグ関連
         self.is_div         = False                                       # ダイバージェンスが発生していればTrue,起きていなければFalse 
@@ -347,7 +355,7 @@ class TradUltil(object):
 
 
 
-    def _write_csv_dataframe(self, df, path, sep=',', header=True, index=False, mode='w', ascending=True, key='close_timestamp'):
+    def _write_csv_dataframe(self, df, path, sep=',', header=True, index=False, mode='w'):
         """
         データフレームをcsvとして書き出す
         param
@@ -357,8 +365,6 @@ class TradUltil(object):
             header:blool (defalut : True) Trueの場合はヘッダを書き出す
             mode:str     出力モード(default : w )
             index(default True):bool Trueの場合indexも書き出す(default : False) 
-            ascending :bool (defalut : True) Trueの場合は昇順でファイル出力
-            key:str (defalut :index) sortするためのkey
         return
             True   書き出し成功
             False  書き出し失敗
@@ -372,31 +378,15 @@ class TradUltil(object):
             os.makedirs(tmp_dir, exist_ok=True)
             log.info(f'maked dir : [{tmp_dir}]')
 
-        # ソート
+        df_tmp = df.copy()
         try:
-            df_tmp = df.copy()
-            if ascending == True:
-                # 昇順
-                df_tmp = df_tmp.sort_values(by=key, ascending=True)
-            else:
-                # 降順
-                df_tmp = df_tmp.sort_values(by=key, ascending=False)
-        except KeyError as e:
-            log.error(f'not found key for sort : [{e}]')
-            log.error(f'_write_csv_dataframe() cancelled.')
-            return False
+            if df_tmp.to_csv(path_or_buf=path, sep=sep, index=index, mode=mode, header=header) == None:
+                log.info(f'write dataframe to csv done. : [{path}]')
+                del(df_tmp)
+                return True
         except Exception as e:
             log.error(f'_write_csv_dataframe() cancelled.')
             return False 
-
-        # header有り
-        if df_tmp.to_csv(path_or_buf=path, sep=sep, index=index, mode=mode, header=header) == None:
-            log.info(f'write dataframe to csv done. : [{path}]')
-            del(df_tmp)
-            return True
-        log.error(f'write dataframe to csv failure. : [{path}]')
-        del(df_tmp)
-        return False
 
     
 
@@ -768,7 +758,7 @@ class TradUltil(object):
         except Exception as e:
             driver.quit()
             log.critical(f'cant open headless browser : [{e}]')
-            raise MacdScrapGetError(f'cant open headless browser : [{e}]')
+            raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
         log.info(f'headless browser opend')
 
@@ -797,95 +787,118 @@ class TradUltil(object):
                 # numpyのndarrayに変換
                 macd_array  = np.array(macd_array) 
                 stoch_array = np.array(stoch_array)
+
+                #------------------------------------------------------------------------
+                # tradingview側でHTMLの変更があった場合に備えて
+                # 値に制限のある ストキャスティクスの値でスクレイピングの異常を検知する
+                #------------------------------------------------------------------------
+                if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
+                    log.critical(f'sotch value invalid : [{stoch_array}]')
+                    raise MacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
             except Exception as e:
-                log.critical(f'cant get macd data : [{e}]')
+                log.critical(f'cant get macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
-                raise MacdScrapGetError(f'cant open headless browser : [{e}]')
+                raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
-
-            # データフレームとして作成しメンバーに登録
+            # データフレームとして作成しメンバーに登録(時系列では降順として作成)
             macd_stream_df_tmp   = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
             stoch_stream_df_tmp  = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD','get_time'])   
-            self.macd_stream_df  = pd.concat([self.macd_stream_df, macd_stream_df_tmp], ignore_index=True)
-            self.stoch_stream_df = pd.concat([self.stoch_stream_df, stoch_stream_df_tmp], ignore_index=True)   
-            log.info(f'memb registed done')
+            self.macd_stream_df  = pd.concat([macd_stream_df_tmp, self.macd_stream_df], ignore_index=True)
+            self.stoch_stream_df = pd.concat([stoch_stream_df_tmp, self.stoch_stream_df], ignore_index=True)   
+            log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
+
+            # 1分足macd,stochのcloseデータを作成
+            if macd_stream_df_tmp['get_time'].item().second == 59:
+                self.mk_close_macd(df=macd_stream_df_tmp)
+            if stoch_stream_df_tmp['get_time'].item().second == 59:
+                self.mk_close_stoch(df=stoch_stream_df_tmp)
 
             del(macd_stream_df_tmp)
             del(stoch_stream_df_tmp)
-            time.sleep(sleep_sec)
-
-            # 1分足macd,stochのcloseデータを作成
-            self.mk_close_macd()
-            self.mk_close_stoch()
 
             # メモリ削減のため古いデータを削除
-            if len(self.macd_stream_df)  == n_row:self.macd_stream_df.drop(index=0, inplace=True)
-            if len(self.stoch_stream_df) == n_row:self.stoch_stream_df.drop(index=0, inplace=True)
+            if len(self.macd_stream_df)  == n_row:self.macd_stream_df.drop(index=self.macd_stream_df.index.max(), inplace=True)
+            if len(self.stoch_stream_df) == n_row:self.stoch_stream_df.drop(index=self.stoch_stream_df.index.max(), inplace=True)
+
+            # ファイル書き出し
+            try:
+                self._write_csv_dataframe(df=self.macd_stream_df, path=MACD_STREAM_FILE_PATH + self.macd_stream_filename)
+                self._write_csv_dataframe(df=self.stoch_stream_df, path=STOCH_STREAM_FILE_PATH + self.stoch_stream_filename)
+            except Exception as e:
+                log.critical(f'cant write macd stoch data : [{e}]')
+                driver.quit()
+                self.init_memb()
+                raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
+
+            time.sleep(sleep_sec)
             log.info(f'scraping 1cycle done')
 
 
 
-    def mk_close_macd(self, n_row=30):
+    def mk_close_macd(self, df, n_row=30):
         """
         * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
+          作成したデータをCSVとして出力する
         * param
-            なし
+            df   :dataframe closeデータ作成のためのデータフレーム
+            n_row:int (default 30) 保持する行数
         * return
             True :bool closeデータ作成成功
-            False:bool closeデータ作成失敗
-            None :bool closeデータが見つからない場合
+            False:bool closeデータ作成失敗             
         """
         log.info(f'mk_close_macd() called') 
 
+        # メンバに登録(時系列としては昇順)
+        self.macd_df = pd.concat([self.macd_df, df], ignore_index=True)
+        log.info(f'close macd data make done')
+        # ファイル出力
         try:
-            macd_df_tmp = self.macd_stream_df[self.macd_stream_df.index.max():self.macd_stream_df.index.max()+1]
-            if macd_df_tmp['get_time'].item().second != 59:
-                log.info(f'not found close macd record')
-                return None
+            self._write_csv_dataframe(df=self.macd_df, path=MACD_FILE_PATH + self.macd_filename)
         except Exception as e:
-            log.error(f'cant get close macd : [{e}]')
+            log.critical(f'to csv failed : [{e}]')
             return False
 
-        # メンバに登録
-        self.macd_df = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
-        log.info(f'close macd data make done')
 #test
         print('----- macd -----')
         print(self.macd_df)
         if len(self.macd_df)  == n_row:self.macd_df.drop(index=0, inplace=True)
+        del(df)
+        log.info(f'mk_close_macd() done')
         return True
 
 
 
-    def mk_close_stoch(self, n_row=30):
+    def mk_close_stoch(self, df, n_row=30):
         """
         * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
+          ※スクレイピング処理に時間がかかり欠損が生じるため59秒のデータを取得できい場合は58秒時の値を採用する
         * param
-            なし
+            df   :dataframe closeデータ作成のためのデータフレーム
+            n_row:int (default 30) 保持する行数
         * return
             True :bool closeデータ作成成功
             False:bool closeデータ作成失敗
-            None :bool closeデータが見つからない場合
         """
         log.info(f'mk_close_stoch() called') 
 
-        try:
-            stoch_df_tmp = self.stoch_stream_df[self.stoch_stream_df.index.max():self.stoch_stream_df.index.max()+1]
-            if stoch_df_tmp['get_time'].item().second != 59:
-                log.info(f'not found close stoch record')
-                return None
-        except Exception as e:
-            log.error(f'cant get close stoch : [{e}]')
-            return False
 
-        # メンバに登録
-        self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)
+        # メンバに登録(時系列としては昇順)
+        self.stoch_df = pd.concat([self.stoch_df, df], ignore_index=True)
         log.info(f'close stoch data make done')
+
+        # ファイル出力
+        try:
+            self._write_csv_dataframe(df=self.stoch_df, path=STOCH_FILE_PATH + self.stoch_filename)
+        except Exception as e:
+            log.critical(f'to csv failed : [{e}]')
+            return False
 #test
         print('----- stoch -----')
         print(self.stoch_df)
         if len(self.stoch_df)  == n_row:self.stoch_df.drop(index=0, inplace=True)
+        del(df)
+        log.info(f'mk_close_stoch() done')
         return True
 
 
