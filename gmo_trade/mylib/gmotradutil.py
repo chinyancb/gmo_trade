@@ -393,7 +393,90 @@ class GmoTradUtil(object):
             log.error(f'_write_csv_dataframe() cancelled.')
             return False 
 
-    
+
+
+    def _read_csv_dataframe(self, path, filename=None, header=True, dtypes=None):
+        """
+        * csvファイルをデータフレームとして読み込む
+        * param
+            path:str csvファイル格納ディレクトリパス。末尾に「/」をつけること
+            filename:str (defult None) 読み込むファイル名
+                         ※ Noneの場合指定されたディレクトリパス配下の最新のファイルを読み込む
+            header:bool (default True) 読み込むファイルにヘッダーがあるか
+                   True:ヘッダーあり
+                   False:ヘッダー無し
+            dtype:dict (default None) カラムの型を指定したい場合は下記のように定義する
+                  {'a': 'int', 'b': 'float', 'c': 'str', 'd': 'np.datetime[64]', 'e': 'datetime'}
+                  ただし設定できる型は上記のみ
+        * return
+            load_df:dataframe
+                    読み込み成功:csvデータを格納したデータフレーム
+                    読み込み失敗:空のデータフレーム
+        """
+        log.info(f'_read_csv_dataframe() called')
+
+        # ディレクトリ存在チェック
+        if os.path.isdir(path) == False:
+            log.error(f'not found path : [{path}]')
+            return pd.DataFrame()
+                    
+
+        # ファイル特定
+        if filename == None:
+            try:
+                files = glob.glob(f"{path}*")
+                latest_file = max(files, key=os.path.getctime)
+            except Exception as e:
+                log.error(f'not found file : [{e}]')
+                return pd.DataFrame()
+        
+        else:
+            try:
+                latest_file = f'{path + filename}'
+                # ファイルの存在チェック
+                if os.path.exists(latest_file) != True:
+                    log.error(f'not found file : [{filename}]')
+                    return pd.DataFrame()
+            except Exception as e:
+                log.error(f'not found file : [{e}]')
+                return pd.DataFrame()
+
+        # ファイル読み込み
+        if header != True:
+            load_df = pd.read_csv(filepath_or_buffer=latest_file, header=None)
+        else:
+            load_df = pd.read_csv(filepath_or_buffer=latest_file, header=0)
+        log.info(f'load data frame done')
+
+
+        # 型指定がある場合
+        if dtypes != None:
+            try:
+                for col ,vtype in dtypes.items(): 
+                    if vtype == 'int':
+                        load_df[col] = load_df[col].astype('int')
+                    elif vtype == 'float':
+                        load_df[col] = load_df[col].astype('float')
+                    elif vtype == 'str':
+                        load_df[col] = load_df[col].astype('str')
+                    elif vtype == 'np.datetime[64]':
+                        load_df[col] = pd.to_datetime(load_df[col])
+                    elif vtype == 'datetime':
+                        for i in range(len(load_df)):
+                            load_df[col][i] = pd.to_datetime(load_df[col][i]).to_pydatetime()
+                    else:
+                        log.error('invalid set of columns name or type')
+                        return pd.DataFrame()
+                else:
+                    log.info(f'type convert done')
+            except Exception as e:
+                log.error(f'convert error : [{e}]')
+                return pd.DataFrame()
+
+        log.info(f'_read_csv_dataframe() done')
+        return load_df
+         
+
 
     def _get_exchg_status(self, retry_sleep_sec=3):
         """
@@ -772,7 +855,9 @@ class GmoTradUtil(object):
             try:
                 # CSSセレクタで指定のクラスでelementを取得
                 ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
-                get_time = datetime.datetime.now(tz=JST)
+                get_time = datetime.datetime.now()
+#test
+                print(type(get_time))
                 log.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
@@ -908,7 +993,7 @@ class GmoTradUtil(object):
 
 
 
-    def check_cor_gmo_bitflyer(self, cor_thresh=0.68, symbol='BTC_JPY', sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, len_thresh=10):
+    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, len_thresh=10):
         """
         * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
         * param
@@ -930,8 +1015,8 @@ class GmoTradUtil(object):
         btu = BitfilyerTradUtil() 
 
         # レート格納用配列(乱数で初期化※空で作成すると相関係数を計算する時にゼロで割りエラーとなるため)
-        gmo_rate_array = np.array([random.randrange(1,5)])
-        bitflyer_rate_array = np.array([random.randrange(1,5)])
+        gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
+        bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
         
         # リトライカウント用変数
         gmo_retry_cnt  = 0
@@ -963,7 +1048,7 @@ class GmoTradUtil(object):
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
                     # 配列、リトライカウント用変数を初期化
-                    gmo_rate_array = np.array([random.randrange(1,5)])
+                    gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
                     gmo_retry_cnt  = 0
                     continue
 
@@ -992,7 +1077,7 @@ class GmoTradUtil(object):
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
                     # 配列、リトライカウント初期化
-                    bitflyer_rate_array = np.array([random.randrange(1,5)])
+                    bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
                     bitf_retry_cnt = 0
                     continue
 
@@ -1006,8 +1091,8 @@ class GmoTradUtil(object):
             
             # 配列の長さが等しく無ければ配列を初期化し再度最新レートを取得する
             if len(gmo_rate_array) != len(bitflyer_rate_array):
-                gmo_rate_array = np.array([random.randrange(1,5)])
-                bitflyer_rate_array = np.array([random.randrange(1,5)])
+                gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
+                bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
                 log.info(f'gmo and biftlyer rate array length no match. init both array')
                 continue
 
@@ -1056,248 +1141,18 @@ class GmoTradUtil(object):
 
 
 
-    def macd_calculator(self):
-        '''
-        MACDを計算する
-        *param
-            無し
-        *return
-            None : MACDを計算できるcloseデータがない場合
-            True : MACDを計算しpositioner()を実行した場合
-            False: MACDを計算しpositioner()を実行しなかった場合
-        ''' 
-        log.info('macd_calculator() called')
-
-        # closeレートが26個無いと計算できないためNoneを返す
-        if len(self.close_rate_df) < 26: 
-            log.info(f'close data not enough : [{len(self.close_rate_df)}]')
-            return None
-
-        # closeの情報をコピー
-        macd_tmp_df = self.close_rate_df.copy()
-
-        # 時系列を昇順にソート
-        macd_tmp_df = macd_tmp_df.sort_values(by="close_timestamp", axis=0, inplace=False).reset_index(level=0, drop=True)
-
-        # MACD計算
-        macd_period = {'long' : 26, 'short' : 12}
-        signal_period = 9
-        macd_tmp_df["macd"] = macd(macd_tmp_df["close_rate"].values.tolist(),  macd_period['short'], macd_period['long'])
-        log.info(f"macd calculated : [{macd_tmp_df['macd'].tail(n=1)}]")
-
-        # Pytiの仕様により初回のmacdの計算結果は一つとなる
-        macd_tmp_df = pd.concat([self.macd_df, macd_tmp_df.tail(n=1)])
-
-        #-----------------------------------------------------------------
-        # シグナル,ヒストグラム計算
-        # !!!tradingviewではシグナルの定義がMACDのemaなのでemaで計算!!!
-        # https://jp.tradingview.com/scripts/macd/
-        # https://jp.tradingview.com/scripts/macd/?solution=43000502344
-        #-----------------------------------------------------------------
-
-        # シグナル,ヒストグラムの計算
-        if len(macd_tmp_df["macd"]) >= 9:
-            macd_tmp_df["signal"] = ema(macd_tmp_df["macd"].values.tolist(), signal_period)
-            macd_tmp_df["hist"]   = macd_tmp_df["macd"] - macd_tmp_df["signal"]
-            log.info(f"signal  : [{macd_tmp_df['signal'].tail(n=1)}] - hist :[{macd_tmp_df['hist'].tail(n=1)}]")
-
-        self.macd_df = macd_tmp_df.reset_index(level=0, drop=True)
-
-        print('----- test macd_df -----')
-        print(self.macd_df)
-        print('----- test macd_df -----')
-        
-
-        del(macd_tmp_df)
-
-        # ファイル出力(再ロードする際に大きなファイルとなるためデータは昇順だがファイル出力は降順で書き出し　
-        self._write_csv_dataframe(self.macd_df, path=MACD_FILE_PATH + self.macd_filename, ascending=False)
-
-        #------------------------------------------
-        # ポジション判定
-        #------------------------------------------
-
-        # もしヒストグラムが手動で変更された場合はヒストグラムを指定して実行
-        # そうでなければデフォルトで実行
-        filename = self._get_file_name(path=SYSCONTROL, prefix='hist') 
-        if re.search('^hist_', filename):
-            hist_manual = int(filename.split('_')[-1])
-            log.info(f'hist_thresh is changed at manual. hist_thresh : [{hist_manual}]')
-            self.positioner(hist_thresh=hist_manual)
-#        else:
-#            # デフォルトのヒストグラムの閾値で実行
-#            self.positioner()
-#
-#        # データフレームの行数が27行以上になったら先頭行を削除
-#        if len(self.macd_df)       > 26: self.macd_df.drop(index=0, inplace=True)
-#        if len(self.close_rate_df) > 26: self.close_rate_df.drop(index=0, inplace=True)
-#
-#        log.info(f'macd_calculator() done')
-
-        return True
-
-
-
-
-    def positioner(self, n_row=15, macd_thresh=8000, n_macd_ok=5, hist_thresh=3500, hist_zero=200):
+    def positioner_stoch(self):
         """
-        * ポジションを判定する
-          ポジションはメインポジション、サポートポジションの２つで管理する
-          ポジションは3つ：LONG、SHORT、STAY
-          ポジション判定はMACD、シグナルの傾き、ヒストグラムの値で判定する
-          MACDが+-閾値以上以下でないとポジション判定を行わない
-        * closeレートとMACDが逆行（ダイバージェンス）が起きたらメインポジション、サポートポジション共にSTAY
-        * ヒストグラムが+-200未満は0とする
+        * ストキャスティクスの値によりポジション判定を行う
+          スクレイピングとは別プロセスなのでスクレイピングで出力したファイルを読み込み判定する
+          ストキャスティクスはリアルタイムでなく1分足closeを使用する
         * param
-            n_row      :int (default 5) self.pos_jdg_dfを保持するレコード数(メモリ削減のため)
-            macd_thresh:int (default 8000) ポジション判定するためのMACDの閾値※値を上げるほど厳しい閾値になる
-#            n_macd_ok  :int (default 5) MACDの閾値をクリアしたcloseデータの個数 ※値をあげるほど厳しい閾値になる
-            hist_thresh:int (default 1200) ポジションを判別するためのヒストグラム閾値※値を下げるほど厳しい閾値になる
-#            hist_zero  :int (default 200) 指定された値未満は0とみなす※値を下げるほど厳しい閾値になる
+            なし
         * return
-            True:bool (self.pos_jdg_dfにてポジションデータと判定した時刻のタイムスタンプを格納)
-            None:bool ポジション判定を行わない場合
+            True :bool 判定処理成功
+            False:bool 判定処理失敗
         """
-
-        log.info(f'positioner() called')
-        #-----------------------------------------------------------------------------------------
-        # ※ Pytiの仕様によりcloseのデータが26個で初めて計算されるため、macdが計算されても
-        # macdが9個ないとシグナル、ヒストグラムが計算されない
-        # シグナル、ヒストグラムも3個必要であるため、MACDの個数が11個必要。11個なければNoneを返す
-        #-----------------------------------------------------------------------------------------
-        if self.macd_df.count()['macd'] < 11:
-            log.info(f"macd data not enough  : [{self.macd_df.count()['macd']}]")
-            return None 
-
-        # ポジション判定停止が出ている場合はポジション判定を行わない
-        if self.is_exit_file(SYSCONTROL, INIT_POSITION):
-            log.info(f'init Judgment position file exists. : [{SYSCONTROL + INIT_POSITION}]')
-            self.init_position()
-            return None
-
-        # データ取得
-        macd_tmp_df = self.macd_df.tail(n=3).copy()
-        macd_tmp_df = macd_tmp_df.sort_values(by="close_timestamp", axis=0, inplace=False).reset_index(level=0, drop=True)
-
-        # 一時格納用データフレーム作成
-        pos_jdg_tmp_df = pd.DataFrame()
-
-        #-----------------------------------------------------------------------------------------
-        # !!! ダイバージェンスが起きている場合はメイン,サポートポジション共に初期化(STAY)にする
-        #-----------------------------------------------------------------------------------------
-        if self.is_div == True:
-            if self.init_position():
-                log.info(f"Divergence occur! all position STAY. self.pos_jdg_df: [{self.pos_jdg_df}]")
-                return None    
-
-        # MACDの値が閾値を超えていないと判定しない
-        if ((macd_tmp_df['macd'] >= macd_thresh).all() == False) and ((macd_tmp_df['macd'] <= -macd_thresh).all() == False):
-            log.info(f"macd not satisfy :[{macd_tmp_df['macd']}]")
-            return None
-
-        # ヒストグラム
-        ht0  =  macd_tmp_df['hist'][0]
-        ht1  =  macd_tmp_df['hist'][1]
-        ht2  =  macd_tmp_df['hist'][2]
-
-        # MACD
-        md0 = macd_tmp_df['macd'][0]
-        md1 = macd_tmp_df['macd'][1]
-        md2 = macd_tmp_df['macd'][2]
-
-        # シグナル
-        sg0 = macd_tmp_df['signal'][0]
-        sg1 = macd_tmp_df['signal'][1]
-        sg2 = macd_tmp_df['signal'][2]
-
-
-        # 最新のMACDとシグナルの傾き
-        kmd1 = (md1 - md0) / 1
-        kmd2 = (md2 - md1) / 1
-        ksg1 = (sg1 - sg0) / 1
-        ksg2 = (sg2 - sg1) / 1
-        
-
-        # 一時格納用データフレーム作成
-        pos_jdg_tmp_df = pd.DataFrame([{'main_pos':'STAY','sup_pos':'STAY',
-            'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
-        
-        #----------------------------------------------------------------
-        # パターン1 MACDが閾値クリア、MACDとシグナルの傾きが逆転した場合
-        #----------------------------------------------------------------
-        # LONG目線(GX間近)
-        if (macd_tmp_df['macd'] <= -macd_thresh).all():
-            if ((kmd2 > 0) and (ksg2 < 0) and (kmd1 < 0) and (ksg1 < 0)):
-                jdg_time                        = datetime.datetime.now(tz=JST)
-                pos_jdg_tmp_df['main_pos']      = 'LONG'
-                pos_jdg_tmp_df['sup_pos']       = 'LONG'
-                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
-                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
-                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-                log.info(f"pattern 11 position : [{self.pos_jdg_df.tail(n=1)}]")
-
-        # SHORT目線(SHORT間近)
-        elif (macd_tmp_df['macd'] >= macd_thresh).all():
-            if ((0 < ht2 < hist_thresh) and (kmd5 < 0) and (ksg2 > 0)):
-                jdg_time                        = datetime.datetime.now(tz=JST)
-                pos_jdg_tmp_df['main_pos']      = 'SHORT'
-                pos_jdg_tmp_df['sup_pos']       = 'SHORT'
-                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
-                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
-                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-                log.info(f"pattern 12 position : [{self.pos_jdg_df.tail(n=1)}]")
-
-#        #------------------------------------------------------------------------------
-#        # パターン2 ヒストグラムが閾値を超えてないが、MACDが大きく振れGX、DX間近の場合
-#        # MACDの閾値は+-8000とする
-#        #------------------------------------------------------------------------------
-#        # LONG目線(GX間近)
-#        elif (macd_tmp_df['macd'] < -8000).all():
-#            if ((md2 > md1) and (sg2 < sg1)):
-#                jdg_time                        = datetime.datetime.now(tz=JST)
-#                pos_jdg_tmp_df['main_pos']      = 'LONG'
-#                pos_jdg_tmp_df['sup_pos']       = 'LONG'
-#                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
-#                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
-#                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-#                log.info(f"pattern 21 position : [{self.pos_jdg_df.tail(n=1)}]")
-#
-#        # SHORT目線(DX間近)
-#        elif (macd_tmp_df['macd'] > 8000).all():
-#            if ((md2 < md1) and (sg2 > sg1)):
-#                jdg_time                        = datetime.datetime.now(tz=JST)
-#                pos_jdg_tmp_df['main_pos']      = 'SHORT'
-#                pos_jdg_tmp_df['sup_pos']       = 'SHORT'
-#                pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
-#                pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
-#                self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-#                log.info(f"pattern 22 position : [{self.pos_jdg_df.tail(n=1)}]")
-#
-#        #--------------------------------------------------
-#        # パターン3 MACDがシグナル上で反発した場合(一旦やめ
-#        #--------------------------------------------------
-#        # LONG目線
-#        #elif ((abs(ht0) < hist_zero) and (abs(ht1) < hist_zero)):
-#
-        # 上記以外はSTAY
-        else:
-            jdg_time                        = datetime.datetime.now(tz=JST)
-            pos_jdg_tmp_df['main_pos']      = self.pos_jdg_df['main_pos'][0]
-            pos_jdg_tmp_df['sup_pos']       = 'STAY'
-            pos_jdg_tmp_df['jdg_timestamp'] = jdg_time 
-            pos_jdg_tmp_df                  = pd.merge(macd_tmp_df.tail(n=1).reset_index(level=0, drop=True), pos_jdg_tmp_df, left_index=True, right_index=True)
-            self.pos_jdg_df                 = pd.concat([pos_jdg_tmp_df, self.pos_jdg_df], ignore_index=True).dropna(how='all')
-            log.info(f"pattern none position : [{self.pos_jdg_df.tail(n=1)}]")
-        
-        # ファイル出力(時系列的に最新を優先しているの降順で出力)
-        self._write_csv_dataframe(self.pos_jdg_df, path=POSITION_FILE_PATH + self.pos_filename, ascending=False, key='jdg_timestamp')
-        # メモリ削減のため一番古いデータを削除
-        print('---------- pos ----------')
-        print(self.pos_jdg_df)
-        print('---------- pos ----------')
-        if len(self.pos_jdg_df) > n_row: self.pos_jdg_df.drop(index=n_row, inplace=True)
-        log.info(f'positioner() done')
-        return True
+            
 
 
 
