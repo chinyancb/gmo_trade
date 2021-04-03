@@ -70,9 +70,10 @@ log = logging.getLogger('gmotradeUtil')
 
 
 
+# 自作の例外class
 class ExchangStatusGetError(Exception):
     """
-    取引所用　自作例外クラス
+    取引所のステータスが確認できない
     """
     pass
 
@@ -87,6 +88,7 @@ class MacdStochScrapGetError(Exception):
     tradingviewからスクレイピングでMACD,ストキャスティクス関連情報を取得できない
     """
     pass
+
 
 
 class GmoTradUtil(object):
@@ -917,7 +919,7 @@ class GmoTradUtil(object):
             retry_thresh:int (default 3) リトライ回数の閾値。超えるとSTOP_NEW_TRADEファイルを作成
             len_thresh:int (default 60) レートを保持する個数。超えると古いものから削除する
         * return
-            無し
+            無し 
                 閾値以上:pass
                 閾値未満:STOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                          ※ただし閾値以上に戻ったらSTOP_NEW_TRADE ファイルを削除する
@@ -956,7 +958,7 @@ class GmoTradUtil(object):
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
                     if line_cnt == 0:
                         self.line.send_line_notify(f'\
-                                [CRITICALL]
+                                [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
@@ -985,7 +987,7 @@ class GmoTradUtil(object):
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) 
                     if line_cnt == 0:
                         self.line.send_line_notify(f'\
-                                [CRITICALL]
+                                [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
@@ -1012,14 +1014,14 @@ class GmoTradUtil(object):
 
             # 相関係数を計算
             cor = np.corrcoef(gmo_rate_array, bitflyer_rate_array)[0,1]
-#test
-            print(cor)
+
+            # 相関係数が閾値以上
             if cor >= cor_thresh:
                 # ポジション停止ファイルがあった場合は削除する
                 if self.rm_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) == True:
                     if line_cnt == 1:
                         self.line.send_line_notify(f'\
-                                [INFO]
+                                [INFO]\
                                 GMOコインとビットフライヤーでトレンドの相関が戻りました。\
                                 新規ポジション作成可能状態に復旧します。\
                                 相関係数:{cor}')
@@ -1034,7 +1036,7 @@ class GmoTradUtil(object):
                 log.critical('stop new trad. make file {STOP_NEW_TRADE}')
                 if line_cnt == 0:
                     self.line.send_line_notify(f'\
-                            [CRITICALL]
+                            [CRITICALL]\
                             GMOコインとビットフライヤーでトレンドの相関が崩れました。\
                             新規ポジションを停止します。\
                             相関係数:{cor}')
