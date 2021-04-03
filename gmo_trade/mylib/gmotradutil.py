@@ -955,7 +955,9 @@ class GmoTradUtil(object):
                 if gmo_retry_cnt > retry_thresh:
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
                     if line_cnt == 0:
-                        self.line.send_line_notify(f'ビットフライヤーの最新レートを取得できませんでした。\
+                        self.line.send_line_notify(f'\
+                                [CRITICALL]
+                                ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
                     # 配列、リトライカウント用変数を初期化
@@ -965,9 +967,6 @@ class GmoTradUtil(object):
 
             # レート格納
             gmo_rate_array = np.append(gmo_rate_array, int(gmo_rate))
-# test
-            print(f'gmo {gmo_rate_array}')
-            line_cnt = 0
             #-------------- GMO ここまで --------------#
 
             while True:
@@ -986,6 +985,7 @@ class GmoTradUtil(object):
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) 
                     if line_cnt == 0:
                         self.line.send_line_notify(f'\
+                                [CRITICALL]
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
@@ -996,9 +996,6 @@ class GmoTradUtil(object):
 
             # レート格納
             bitflyer_rate_array = np.append(bitflyer_rate_array, int(bitflyer_rate['ltp']))
-            line_cnt = 0
-#test
-            print(f'bitf {bitflyer_rate_array}')
             #-------------- ビットフライヤー ここまで --------------#
 
             # レートの個数が2つ以上無い計算できないためconitnue
@@ -1022,6 +1019,7 @@ class GmoTradUtil(object):
                 if self.rm_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) == True:
                     if line_cnt == 1:
                         self.line.send_line_notify(f'\
+                                [INFO]
                                 GMOコインとビットフライヤーでトレンドの相関が戻りました。\
                                 新規ポジション作成可能状態に復旧します。\
                                 相関係数:{cor}')
@@ -1036,6 +1034,7 @@ class GmoTradUtil(object):
                 log.critical('stop new trad. make file {STOP_NEW_TRADE}')
                 if line_cnt == 0:
                     self.line.send_line_notify(f'\
+                            [CRITICALL]
                             GMOコインとビットフライヤーでトレンドの相関が崩れました。\
                             新規ポジションを停止します。\
                             相関係数:{cor}')
