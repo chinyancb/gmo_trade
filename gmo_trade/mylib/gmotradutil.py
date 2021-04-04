@@ -856,8 +856,6 @@ class GmoTradUtil(object):
                 # CSSセレクタで指定のクラスでelementを取得
                 ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
                 get_time = datetime.datetime.now()
-#test
-                print(type(get_time))
                 log.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
@@ -993,15 +991,20 @@ class GmoTradUtil(object):
 
 
 
-    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, len_thresh=10):
+    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', n_mv=3, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=5, len_thresh=25):
         """
         * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
+          相関関係は1分足の5移動平均の相関係数で判断
+          相関関係が確認されるまで「STOP_NEW_TRADE」ファイルを作成し新規ポジションを作成させない
+          相関関係が確認されると「STOP_NEW_TRADE」ファイルを削除しトレード可能となる
         * param
             cor_thresh:float (default 0.7) 相関係数の閾値。これを下回ると取引停止とさせる
             symbol:str (default 'BTC_JPY') 対象となる通貨
+            n_mv:int (defult 5) 移動平均の次数
             sleep_sec:int (default 5) スリープ秒
             retry_sleep_sec:int (default 10) リトライ用のスリープ
             retry_thresh:int (default 3) リトライ回数の閾値。超えるとSTOP_NEW_TRADEファイルを作成
+            sma_len_thresh:int (default 5) 単純移動平均を保持する個数。超えると古いものから削除する
             len_thresh:int (default 60) レートを保持する個数。超えると古いものから削除する
         * return
             無し 
@@ -1011,12 +1014,17 @@ class GmoTradUtil(object):
         """
         log.info(f'is_cor_gmo_bitflyer() called')
 
+        # 新規ポジションを停止させる「STOP_NEW_TRADE」を作成
+        self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
+
         # ビットフライヤー用のインスタンス作成
         btu = BitfilyerTradUtil() 
 
-        # レート格納用配列(乱数で初期化※空で作成すると相関係数を計算する時にゼロで割りエラーとなるため)
-        gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
-        bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
+        # レート格納用dataframe(乱数で初期化※空で作成すると相関係数を計算する時にゼロで割りエラーとなるため)
+        gmo_rate_df          = pd.DataFrame(columns=['rate'])
+        gmo_rate_sma_df      = pd.DataFrame(columns=['rate_sma'])
+        bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
+        bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
         
         # リトライカウント用変数
         gmo_retry_cnt  = 0
@@ -1047,13 +1055,21 @@ class GmoTradUtil(object):
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
-                    # 配列、リトライカウント用変数を初期化
-                    gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
+                    # dataframe、リトライカウント用変数を初期化
+                    gmo_rate_df     = pd.DataFrame(columns=['rate'])
+                    gmo_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
                     gmo_retry_cnt  = 0
                     continue
 
             # レート格納
-            gmo_rate_array = np.append(gmo_rate_array, int(gmo_rate))
+            df_tmp = pd.DataFrame([gmo_rate], columns=['rate'])
+            gmo_rate_df = pd.concat([gmo_rate_df, df_tmp], ignore_index=True)
+            
+            # 移動平均を計算
+            if len(gmo_rate_df) >= n_mv:
+                df_tmp = pd.DataFrame(columns=['rate_sma']) 
+                df_tmp['rate_sma'] = gmo_rate_df['rate'].rolling(n_mv).mean().dropna(how='all').tail(n=1).values
+                gmo_rate_sma_df = pd.concat([gmo_rate_sma_df, df_tmp], ignore_index=True)
             #-------------- GMO ここまで --------------#
 
             while True:
@@ -1076,29 +1092,41 @@ class GmoTradUtil(object):
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
                         line_cnt += 1
-                    # 配列、リトライカウント初期化
-                    bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
+                    # dataframe、リトライカウント初期化
+                    bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
+                    bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
                     bitf_retry_cnt = 0
                     continue
 
             # レート格納
-            bitflyer_rate_array = np.append(bitflyer_rate_array, int(bitflyer_rate['ltp']))
+            df_tmp = pd.DataFrame([bitflyer_rate['ltp']], columns=['rate'])
+            bitflyer_rate_df = pd.concat([bitflyer_rate_df, df_tmp], ignore_index=True)
+            
+            # 移動平均を計算
+            if len(bitflyer_rate_df) >= n_mv:
+                df_tmp = pd.DataFrame(columns=['rate_sma']) 
+                df_tmp['rate_sma'] = bitflyer_rate_df['rate'].rolling(n_mv).mean().dropna(how='all').tail(n=1).values
+                bitflyer_rate_sma_df = pd.concat([bitflyer_rate_sma_df, df_tmp], ignore_index=True)
             #-------------- ビットフライヤー ここまで --------------#
 
             # レートの個数が2つ以上無い計算できないためconitnue
-            if len(gmo_rate_array) < 2 or len(bitflyer_rate_array) < 2: continue
+            if (len(gmo_rate_sma_df.index) < 2) and (len(bitflyer_rate_sma_df.index) < 2):
+                time.sleep(sleep_sec)
+                continue
 
             
             # 配列の長さが等しく無ければ配列を初期化し再度最新レートを取得する
-            if len(gmo_rate_array) != len(bitflyer_rate_array):
-                gmo_rate_array = np.array([random.randrange(5000000, 6000000)])
-                bitflyer_rate_array = np.array([random.randrange(5000000, 6000000)])
+            if len(gmo_rate_sma_df) != len(bitflyer_rate_sma_df):
+                gmo_rate_df          = pd.DataFrame(columns=['rate'])
+                gmo_rate_sma_df      = pd.DataFrame(columns=['rate_sma'])
+                bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
+                bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
                 log.info(f'gmo and biftlyer rate array length no match. init both array')
                 continue
 
 
             # 相関係数を計算
-            cor = np.corrcoef(gmo_rate_array, bitflyer_rate_array)[0,1]
+            cor = np.corrcoef(gmo_rate_sma_df['rate_sma'].values, bitflyer_rate_sma_df['rate_sma'].values)[0,1]
 
             # 相関係数が閾値以上
             if cor >= cor_thresh:
@@ -1107,8 +1135,8 @@ class GmoTradUtil(object):
                     if line_cnt == 1:
                         self.line.send_line_notify(f'\
                                 [INFO]\
-                                GMOコインとビットフライヤーでトレンドの相関が戻りました。\
-                                新規ポジション作成可能状態に復旧します。\
+                                GMOコインとビットフライヤーでトレンドの相関が確認できました。\
+                                新規ポジション作成可能状態にします。\
                                 相関係数:{cor}')
                         line_cnt = 0
 
@@ -1123,15 +1151,25 @@ class GmoTradUtil(object):
                     self.line.send_line_notify(f'\
                             [CRITICALL]\
                             GMOコインとビットフライヤーでトレンドの相関が崩れました。\
-                            新規ポジションを停止します。\
+                            新規ポジションを停止状態にします。\
                             相関係数:{cor}')
                     line_cnt += 1
 
-
             # 配列の長さが閾値を超えると古いものを削除(メモリ削減のため)
-            if len(gmo_rate_array) > len_thresh: gmo_rate_array = np.delete(gmo_rate_array, 0)
-            if len(bitflyer_rate_array) > len_thresh: bitflyer_rate_array = np.delete(bitflyer_rate_array, 0)
+            if len(gmo_rate_df) > len_thresh: gmo_rate_df.drop(index=0, inplace=True)
+            if len(gmo_rate_sma_df) > sma_len_thresh: gmo_rate_sma_df.drop(index=0, inplace=True)
+            if len(bitflyer_rate_df) > len_thresh: bitflyer_rate_df.drop(index=0, inplace=True)
+            if len(bitflyer_rate_sma_df) > sma_len_thresh: bitflyer_rate_sma_df.drop(index=0, inplace=True)
 
+#test
+            print('----- gmo rate -----')
+            print(gmo_rate_df)
+            print('----- gmo sma -----')
+            print(gmo_rate_sma_df)
+            print('----- bitf rate -----')
+            print(bitflyer_rate_df)
+            print('----- bitf sma -----')
+            print(bitflyer_rate_sma_df)
             # リトライカウント初期化
             gmo_retry_cnt  = 0
             bitf_retry_cnt = 0
