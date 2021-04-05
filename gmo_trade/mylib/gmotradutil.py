@@ -991,7 +991,7 @@ class GmoTradUtil(object):
 
 
 
-    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', n_mv=3, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=5, len_thresh=25):
+    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', n_mv=5, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=10, len_thresh=50):
         """
         * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
           相関関係は1分足の5移動平均の相関係数で判断
@@ -1161,15 +1161,6 @@ class GmoTradUtil(object):
             if len(bitflyer_rate_df) > len_thresh: bitflyer_rate_df.drop(index=0, inplace=True)
             if len(bitflyer_rate_sma_df) > sma_len_thresh: bitflyer_rate_sma_df.drop(index=0, inplace=True)
 
-#test
-            print('----- gmo rate -----')
-            print(gmo_rate_df)
-            print('----- gmo sma -----')
-            print(gmo_rate_sma_df)
-            print('----- bitf rate -----')
-            print(bitflyer_rate_df)
-            print('----- bitf sma -----')
-            print(bitflyer_rate_sma_df)
             # リトライカウント初期化
             gmo_retry_cnt  = 0
             bitf_retry_cnt = 0
