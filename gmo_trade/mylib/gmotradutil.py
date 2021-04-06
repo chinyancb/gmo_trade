@@ -19,8 +19,7 @@ import pandas as pd
 import numpy as np
 import random
 import numexpr
-#from pyti.moving_average_convergence_divergence import moving_average_convergence_divergence as macd
-#from pyti.exponential_moving_average import exponential_moving_average as ema
+import asyncio
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import chromedriver_binary
@@ -33,6 +32,7 @@ from mylib.bitfilyertradutil import BitfilyerTradUtil
 #------------------------------
 app_home = str(Path(__file__).parents[1])
 sys.path.append(app_home)
+
 
 #---------------------
 # 定数
@@ -62,11 +62,6 @@ STOP_NEW_TRADE = 'stop_new_trade'     # 新規エントリーを停止する
 
 # JST 変換用定数
 JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST') 
-
-# ロギング
-LOG_CONF = app_home + '/etc/conf/logging.conf'
-logging.config.fileConfig(LOG_CONF)
-log = logging.getLogger('gmotradeUtil')
 
 
 
@@ -103,7 +98,7 @@ class GmoTradUtil(object):
         self.stoch_df         = pd.DataFrame()  # ストキャスティクス確定値データ格納用
         self.pos_jdg_df       = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
         self.pos_macd_jdg_df  = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
-        self.pos_stoch_jdg_df = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
+        self.pos_stoch_tmp_df = pd.DataFrame()  # ポジション計算用データフレーム
 
         # ファイル関連
         self.close_filename        = f"close_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
@@ -121,18 +116,35 @@ class GmoTradUtil(object):
         # Line通知用
         self.line = LineUtil()
 
+        # self.logging設定
+        self.log = self.set_logging(qualname='gmotradeUtil')
+
     
         
+    def set_logging(self, qualname='gmotradeUtil'):
+        """
+        * self.loggingの設定を行う
+        * param
+            qualname:str (default 'gmotradeUtil') self.loging.confで設定した名前
+        * return
+            なし。設定が成功するとself.logに設定されたロガーが格納される
+        """
+        # ロギング
+        LOG_CONF = app_home + '/etc/conf/logging.conf'
+        logging.config.fileConfig(LOG_CONF)
+        print(qualname)
+        self.log = logging.getLogger(qualname)
+
     def init_memb(self):
         """
         closeレートの取得やMACDの計算,その他例外が発生した場合,緊急対応として使用しているdataframe,その他メンバを初期化する
         return:
             True
         """
-        log.info('init_memb() called')
+        self.log.info('init_memb() called')
         self.__init__()
         self.line.send_line_notify('メンバを初期化しました')
-        log.info('init_memb() done')
+        self.log.info('init_memb() done')
         return True
 
 
@@ -146,18 +158,18 @@ class GmoTradUtil(object):
             True :初期化成功
             False:初期化失敗
         """
-        log.info(f'init_position() called')
+        self.log.info(f'init_position() called')
         try:
             pos_jdg_tmp_df = pd.DataFrame([{'main_pos':'STAY','sup_pos':'STAY',
                 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
         except Exception as e:
-            log.critical(f'ポジションの初期化に失敗しました : [{e}]')
+            self.log.critical(f'ポジションの初期化に失敗しました : [{e}]')
             return False
 
         self.pos_jdg_df = pos_jdg_tmp_df.copy()
         del(pos_jdg_tmp_df)
 
-        log.info(f'position data is init done.')
+        self.log.info(f'position data is init done.')
         return True
 
 
@@ -173,25 +185,25 @@ class GmoTradUtil(object):
             True : ファイル作成成功
             False: ファイル作成失敗
         """
-        log.info(f'make_file() called')
-        log.info(f'emptiness : [{path + filename}]')
+        self.log.info(f'make_file() called')
+        self.log.info(f'emptiness : [{path + filename}]')
             
         # ディレクトリ存在チェック。無ければ作成
         tmp_dir_list  = path.split('/')
         tmp_dir = '/'.join([str(i) for i in tmp_dir_list[0:-1]])
         if os.path.isdir(tmp_dir) == False:
             os.makedirs(tmp_dir, exist_ok=True)
-            log.info(f'maked dir : [{tmp_dir}]')
+            self.log.info(f'maked dir : [{tmp_dir}]')
 
         # 空ファイル作成
         try:
             with open(path + filename, mode=mode):
                 pass
         except Exception as e:
-            log.error(f'cant make emptiness file. : [{e}]')
+            self.log.error(f'cant make emptiness file. : [{e}]')
             return False
 
-        log.info(f'emptiness file make done.[{path + filename}]')
+        self.log.info(f'emptiness file make done.[{path + filename}]')
         return True
 
 
@@ -208,21 +220,21 @@ class GmoTradUtil(object):
             False:bool削除失敗
             None:bool ファイルが存在しない or ディレクトリが存在しない
        """ 
-        log.info(f'rm_file() called.')
+        self.log.info(f'rm_file() called.')
         
         # ファイルが存在しない場合
         if self.is_exit_file(path, filename) == False:
-            log.info(f'not found remove file : [{path + filename}]')
+            self.log.info(f'not found remove file : [{path + filename}]')
             return None
 
         try:
             os.remove(path + filename)
         except Exception as e:
-            log.error(f'remove file failure : [{e}]')
+            self.log.error(f'remove file failure : [{e}]')
             return False
 
-        log.info(f'remove file done : [{path + filename}]')
-        log.info(f'rm_file() done')
+        self.log.info(f'remove file done : [{path + filename}]')
+        self.log.info(f'rm_file() done')
         return True
 
 
@@ -238,16 +250,16 @@ class GmoTradUtil(object):
             True :bool ファイルが存在する場合
             False:book ファイルが存在しない場合
         """
-        log.info(f'is_exit_file() called')
+        self.log.info(f'is_exit_file() called')
 
         if os.path.exists(path + filename):
-            log.info(f'file is exists. : [{path + filename}]')
-            log.info(f'is_exit_file is done')
+            self.log.info(f'file is exists. : [{path + filename}]')
+            self.log.info(f'is_exit_file is done')
 
             return True
 
-        log.info(f'file not found : [{path + filename}]')
-        log.info(f'is_exit_file() done')
+        self.log.info(f'file not found : [{path + filename}]')
+        self.log.info(f'is_exit_file() done')
 
         return False
 
@@ -267,16 +279,16 @@ class GmoTradUtil(object):
             cant_get_file:srt ファイル名取得に失敗した場合
         """
 
-        log.info(f'_get_file_name() called')
+        self.log.info(f'_get_file_name() called')
 
         # ディレクトリ存在チェック
         if os.path.exists(path) == False:
-            log.info(f'not found dir : [{path}]')
+            self.log.info(f'not found dir : [{path}]')
             return 'not_found_dir'
 
         # prefixにあたるファイル名があるか確認
         if len(glob.glob(f'{path}{prefix}*')) == 0:
-            log.info(f'not found file : [{path}{prefix}]')
+            self.log.info(f'not found file : [{path}{prefix}]')
             return 'not_found_file'
 
         # ファイル名取得
@@ -284,13 +296,13 @@ class GmoTradUtil(object):
             files = glob.glob(f"{path}{prefix}*")
             filename = max(files, key=os.path.getctime)
         except OSError as e:
-            log.critical(f'cant get file name : [{e}]')
+            self.log.critical(f'cant get file name : [{e}]')
             return 'cant_get_file'
 
         # ファイル名が絶対パスなのでファイル名単体にする
         filename = filename.split('/')[-1]
-        log.info(f'get file : [{filename}]')    
-        log.info(f'_get_file_name() done')
+        self.log.info(f'get file : [{filename}]')    
+        self.log.info(f'_get_file_name() done')
 
         return filename 
 
@@ -306,34 +318,34 @@ class GmoTradUtil(object):
             False:ロードに失敗
             None :posデータファイルが無い場合
         """
-        log.info(f'load_pos_df() called')
+        self.log.info(f'load_pos_df() called')
 
         # posファイルが無い場合
         if len(glob.glob(f'{POSITION_FILE_PATH}pos*')) == 0: 
-            log.error(f'not found pos data file. under path : [{POSITION_FILE_PATH}]')
+            self.log.error(f'not found pos data file. under path : [{POSITION_FILE_PATH}]')
             return None
 
         try:
             files = glob.glob(f"{POSITION_FILE_PATH}pos*")
             latest_file = max(files, key=os.path.getctime)
         except OSError as e:
-            log.critical(f'reload pos data error: [{e}]')
+            self.log.critical(f'reload pos data error: [{e}]')
             return False
 
         # ポジションファイル読み込み
         try:
             latest_file = latest_file.split('/')[-1]
-            log.info(f'load file : [{latest_file}]')
+            self.log.info(f'load file : [{latest_file}]')
             pos_df = pd.read_csv(filepath_or_buffer=POSITION_FILE_PATH + latest_file, sep=',', header=0)
-            log.info(f'csv file read done')
+            self.log.info(f'csv file read done')
     
             # 先頭行を読み込み
             pos_df = pos_df.head(n=head_nrow).reset_index(level=0, drop=True)
-            log.info(f'reset index done') 
+            self.log.info(f'reset index done') 
     
             # 文字列からint、datetime型に変換
             pos_df['close_rate'] = pos_df['close_rate'].astype('int')
-            log.info('close_rate dtype convert done.')
+            self.log.info('close_rate dtype convert done.')
     
             # ポジション判定時刻の変換(そのまま読み込んで大丈夫）
             jdg_timestamp_list = []
@@ -343,18 +355,18 @@ class GmoTradUtil(object):
             else:
                 pos_df['jdg_timestamp'] = jdg_timestamp_list 
         except Exception as e:
-            log.error(f'position data load failure : [{POSITION_FILE_PATH + latest_file}, {e}]')
+            self.log.error(f'position data load failure : [{POSITION_FILE_PATH + latest_file}, {e}]')
             return False
 
         # 読み込んだファイルは時系列で降順となっているため昇順に変更
         pos_df = pos_df.sort_values(by ='jdg_timestamp', ascending=True).reset_index(level=0, drop=True)
-        log.info('jdg_timestamp dtype convert done.')
+        self.log.info('jdg_timestamp dtype convert done.')
 
         # メンバとしてコピー
         self.pos_jdg_df = pos_df.copy()
         del(pos_df)
 
-        log.info(f'pos data load success.')
+        self.log.info(f'pos data load success.')
         return True 
 
 
@@ -375,22 +387,22 @@ class GmoTradUtil(object):
             False  書き出し失敗
         """
 
-        log.info('_write_csv_dataframe() called.')
+        self.log.info('_write_csv_dataframe() called.')
         # ディレクトリ存在チェック。無ければ作成
         tmp_dir_list  = path.split('/')
         tmp_dir = '/'.join([str(i) for i in tmp_dir_list[0:-1]])
         if os.path.isdir(tmp_dir) == False:
             os.makedirs(tmp_dir, exist_ok=True)
-            log.info(f'maked dir : [{tmp_dir}]')
+            self.log.info(f'maked dir : [{tmp_dir}]')
 
         df_tmp = df.copy()
         try:
             if df_tmp.to_csv(path_or_buf=path, sep=sep, index=index, mode=mode, header=header) == None:
-                log.info(f'write dataframe to csv done. : [{path}]')
+                self.log.info(f'write dataframe to csv done. : [{path}]')
                 del(df_tmp)
                 return True
         except Exception as e:
-            log.error(f'_write_csv_dataframe() cancelled.')
+            self.log.error(f'_write_csv_dataframe() cancelled.')
             return False 
 
 
@@ -413,11 +425,11 @@ class GmoTradUtil(object):
                     読み込み成功:csvデータを格納したデータフレーム
                     読み込み失敗:空のデータフレーム
         """
-        log.info(f'_read_csv_dataframe() called')
+        self.log.info(f'_read_csv_dataframe() called')
 
         # ディレクトリ存在チェック
         if os.path.isdir(path) == False:
-            log.error(f'not found path : [{path}]')
+            self.log.error(f'not found path : [{path}]')
             return pd.DataFrame()
                     
 
@@ -427,7 +439,7 @@ class GmoTradUtil(object):
                 files = glob.glob(f"{path}*")
                 latest_file = max(files, key=os.path.getctime)
             except Exception as e:
-                log.error(f'not found file : [{e}]')
+                self.log.error(f'not found file : [{e}]')
                 return pd.DataFrame()
         
         else:
@@ -435,10 +447,10 @@ class GmoTradUtil(object):
                 latest_file = f'{path + filename}'
                 # ファイルの存在チェック
                 if os.path.exists(latest_file) != True:
-                    log.error(f'not found file : [{filename}]')
+                    self.log.error(f'not found file : [{filename}]')
                     return pd.DataFrame()
             except Exception as e:
-                log.error(f'not found file : [{e}]')
+                self.log.error(f'not found file : [{e}]')
                 return pd.DataFrame()
 
         # ファイル読み込み
@@ -446,7 +458,7 @@ class GmoTradUtil(object):
             load_df = pd.read_csv(filepath_or_buffer=latest_file, header=None)
         else:
             load_df = pd.read_csv(filepath_or_buffer=latest_file, header=0)
-        log.info(f'load data frame done')
+        self.log.info(f'load data frame done')
 
 
         # 型指定がある場合
@@ -465,15 +477,15 @@ class GmoTradUtil(object):
                         for i in range(len(load_df)):
                             load_df[col][i] = pd.to_datetime(load_df[col][i]).to_pydatetime()
                     else:
-                        log.error('invalid set of columns name or type')
+                        self.log.error('invalid set of columns name or type')
                         return pd.DataFrame()
                 else:
-                    log.info(f'type convert done')
+                    self.log.info(f'type convert done')
             except Exception as e:
-                log.error(f'convert error : [{e}]')
+                self.log.error(f'convert error : [{e}]')
                 return pd.DataFrame()
 
-        log.info(f'_read_csv_dataframe() done')
+        self.log.info(f'_read_csv_dataframe() done')
         return load_df
          
 
@@ -488,7 +500,7 @@ class GmoTradUtil(object):
         * Exception : ExchangStatusGetError
         """
         
-        log.info(f'_get_exchg_status() called')
+        self.log.info(f'_get_exchg_status() called')
         path = '/v1/status'
         url  = PUBLIC_ENDPOINT + path
 
@@ -501,15 +513,15 @@ class GmoTradUtil(object):
                 response = requests.get(url)
                 response.raise_for_status() # HTTPステータスコードが200番台以外であれば例外を発生させる
             except requests.exceptions.RequestException as e:
-                log.critical(f"http status code error : [{e}]")
+                self.log.critical(f"http status code error : [{e}]")
         
                 # リトライ
                 err_htp_cnt += 1
                 if err_htp_cnt <= 10:
-                    log.critical(f"http request error. exec retry: [{e}]")
+                    self.log.critical(f"http request error. exec retry: [{e}]")
                     time.sleep(retry_sleep_sec)
                     continue
-                log.critical(f"http request error. process kill {e}")
+                self.log.critical(f"http request error. process kill {e}")
                 #sys.exit(1)
                 raise ExchangStatusGetError(f'HTTPエラーにより取引所ステータスが取得できません')
 
@@ -520,13 +532,13 @@ class GmoTradUtil(object):
             try:
                 exchg_stat = json.loads(exchg_status_js)['data']['status']
             except Exception as e:
-                log.error(f'不正なレスポンスです. : [{e}]')
+                self.log.error(f'不正なレスポンスです. : [{e}]')
                 raise ExchangStatusGetError(exchg_stat)
             except ExchangStatusGetError as e:
-                log.error(f"取引所ステータスを取得できませんでした:[{e}]")
+                self.log.error(f"取引所ステータスを取得できませんでした:[{e}]")
             break
 
-        log.info(f'_get_exchg_status() is done')
+        self.log.info(f'_get_exchg_status() is done')
         return exchg_stat
 
     
@@ -541,7 +553,7 @@ class GmoTradUtil(object):
             last_rate:int 最新のレート(※レートの取得に失敗は-1を返す)
         """
 
-        log.info(f'_get_rate() called')
+        self.log.info(f'_get_rate() called')
 
         path = f'/v1/ticker?symbol={symbol}'
         url = PUBLIC_ENDPOINT + path
@@ -549,23 +561,23 @@ class GmoTradUtil(object):
             response = requests.get(url)
             response.raise_for_status
         except requests.exceptions.RequestException as e:
-            log.critical(f"http status code error : [{e}]")
+            self.log.critical(f"http status code error : [{e}]")
             return -1
 
         try:
             response_json = json.dumps(response.json())
         except Exception as e:
-            log.error(f'response convert json failure : [{e}]')
+            self.log.error(f'response convert json failure : [{e}]')
             return -1 
 
         # レスポンスのステータスが0以外であれば失敗
         if json.loads(response_json)['status'] != 0:
-            log.error(f'respons status invalid : [{response_json}]')
+            self.log.error(f'respons status invalid : [{response_json}]')
             return -1
 
         last_rate = int(json.loads(response_json)['data'][0]['last'])
         if last_rate:
-            log.info(f'_get_rate() done')
+            self.log.info(f'_get_rate() done')
             return last_rate
         else:
             return -1
@@ -583,21 +595,21 @@ class GmoTradUtil(object):
         # CLOSEデータ取得
         #----------------------------
 
-        log.info(f'_get_close_info() is called')
+        self.log.info(f'_get_close_info() is called')
         # 取引所ステータス確認
         try:
             exchg_stat = self._get_exchg_status() 
             if exchg_stat != 'OPEN':
                 time.sleep(retry_sleep_sec)
-                log.info(f'取引所がOPENではありません。メンバを初期化します: [{exchg_stat}]')
+                self.log.info(f'取引所がOPENではありません。メンバを初期化します: [{exchg_stat}]')
                 raise ExchangStatusGetError(exchg_stat)
         except ExchangStatusGetError as e:
-            log.critical(f'取引所がOPENではありません。メンバを初期化します  : [{e}]')
+            self.log.critical(f'取引所がOPENではありません。メンバを初期化します  : [{e}]')
             self.init_memb()
          
         path = f"/v1/trades?symbol={symbol}&page={page}&count={count}"
         url  = PUBLIC_ENDPOINT + path
-        log.info(f"URL : [{url}]")
+        self.log.info(f"URL : [{url}]")
 
         # イテレーター
         err_htp_cnt = 0 # closeデータHTTPリクエスト失敗カウンター
@@ -608,16 +620,16 @@ class GmoTradUtil(object):
                 response = requests.get(url)
                 response.raise_for_status() # HTTPステータスコードが200番台以外であれば例外を発生させる
             except requests.exceptions.RequestException as e:
-                log.critical(f"{e}")
+                self.log.critical(f"{e}")
         
                 # リトライ
                 err_htp_cnt += 1
                 if err_htp_cnt <= 10:
-                    log.critical(f"http request error. exec retry : [{e}]")
+                    self.log.critical(f"http request error. exec retry : [{e}]")
                     time.sleep(retry_sleep_sec)
                     continue
 
-                log.critical(f'HTTPエラーによりclose情報が取得できません. プロセスを終了します.  : [{e}]')
+                self.log.critical(f'HTTPエラーによりclose情報が取得できません. プロセスを終了します.  : [{e}]')
                 #sys.exit(1)
                 raise CloseRateGetError(f'HTTPエラーによりclose情報が取得できません')
         
@@ -629,12 +641,12 @@ class GmoTradUtil(object):
             if json.loads(rate_info_js)['status'] != 0:
                 err_cnt += 1
                 time.sleep(retry_sleep_sec)
-                log.error(f"status code invalid : [{json.loads(rate_info_js)}]")
+                self.log.error(f"status code invalid : [{json.loads(rate_info_js)}]")
                 continue
 
                 # 3回失敗するとエラー判定
                 if err_cnt == 3:
-                    log.critical(f"不正なレスポンスです。プロセスを終了します : [{json.loads(rate_info_js)}]")
+                    self.log.critical(f"不正なレスポンスです。プロセスを終了します : [{json.loads(rate_info_js)}]")
                     #sys.exit(1)
         
             # データの個数を取得
@@ -646,7 +658,7 @@ class GmoTradUtil(object):
                 close_timestamp_jst = dateutil.parser.parse(close_timestamp_tmp).astimezone(JST)
                 close_rate_tmp = int(json.loads(rate_info_js)['data']['list'][i]['price'])
             
-                log.debug(f"cls_mt : [{cls_mt}] close_timestamp_jst.minute:[{close_timestamp_jst.minute}]")
+                self.log.debug(f"cls_mt : [{cls_mt}] close_timestamp_jst.minute:[{close_timestamp_jst.minute}]")
                 # 分が同じ場合
                 if cls_mt == close_timestamp_jst.minute:
                     close_timestamp = close_timestamp_jst
@@ -656,13 +668,13 @@ class GmoTradUtil(object):
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                 # 100カウントで取得できない場合は現在時刻,レートは-1を返す(暫定対応)
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                log.warning(f'not found close rate in 100 length js.')
+                self.log.warning(f'not found close rate in 100 length js.')
                 close_timestamp = datetime.datetime.now(tz=JST) + datetime.timedelta(seconds=120)
                 return {'close_timestamp' : close_timestamp, 'close_rate' : -1}        
 
             break # while文を抜ける
             #--------------- while文ここまで -----------------#
-        log.info(f'_get_close_info() is done')
+        self.log.info(f'_get_close_info() is done')
         return {'close_timestamp' : close_timestamp, 'close_rate' : close_rate}        
             
 
@@ -682,7 +694,7 @@ class GmoTradUtil(object):
         # 1分足のclose情報を取得(メイン処理)
         #=================================================
 
-        log.info(f'get_close_info() called')
+        self.log.info(f'get_close_info() called')
 
         while True:
 
@@ -699,7 +711,7 @@ class GmoTradUtil(object):
                 time.sleep(1.5)
 
                 # 1分前のcloseデータを取得
-                log.debug(f"cls_tm : {cls_tm}")
+                self.log.debug(f"cls_tm : {cls_tm}")
                 close_dict = self._get_close_info(cls_tm.minute)
 
                 # 最新のcloseの時刻(分)を取得
@@ -708,23 +720,23 @@ class GmoTradUtil(object):
 
                     # close_rateが-1に場合はリトライ
                     if close_dict['close_rate'] == -1:
-                        log.warning(f"not found close data : [{close_dict['close_rate']}]")
-                        log.info(f'retry func[_get_close_info()]')
+                        self.log.warning(f"not found close data : [{close_dict['close_rate']}]")
+                        self.log.info(f'retry func[_get_close_info()]')
                         
                         for _ in np.arange(1, 10):
                             time.sleep(retry_sleep_sec)
                             close_dict = self._get_close_info(cls_tm.minute, page=_)
                             if ((last_close_rate_minute + 1) == close_dict['close_timestamp'].minute) and (close_dict['close_rate'] != -1):
-                                log.info(f'retry is success')
+                                self.log.info(f'retry is success')
                                 break
                         else:
-                            log.info(f'not found close data. raise exception')
+                            self.log.info(f'not found close data. raise exception')
                             raise CloseRateGetError(f'not found close data')
                             return False
 
                 # たまたま初回にclose_rateが-1で最初からやり直し
                 if close_dict['close_rate'] == -1:
-                    log.error(f"error: cant get close data : [{close_dict['close_rate']}]")
+                    self.log.error(f"error: cant get close data : [{close_dict['close_rate']}]")
                     continue
 
                 # データフレームを作成
@@ -736,7 +748,7 @@ class GmoTradUtil(object):
                 self.close_rate_df = pd.concat([self.close_rate_df, close_rate_tmp_df], ignore_index=True).sort_values(by="close_timestamp", axis=0)
 
                 # 1分毎にcloseレートが取れているか確認
-                log.info(f"'check self.close_rate_df'")
+                self.log.info(f"'check self.close_rate_df'")
                 for i in range(0, len(self.close_rate_df)):
                     if i == 0:
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
@@ -747,13 +759,13 @@ class GmoTradUtil(object):
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
                         continue 
                     elif (tmp_close_tm + 1) !=  self.close_rate_df['close_timestamp'][i].minute:
-                        log.error(f"'self.close_rate_df' is  invalid. メンバを初期化します:[{self.close_rate_df.query('index==@i')}]")
+                        self.log.error(f"'self.close_rate_df' is  invalid. メンバを初期化します:[{self.close_rate_df.query('index==@i')}]")
                         self.init_memb() 
                         break
                     else:
                         tmp_close_tm = self.close_rate_df['close_timestamp'][i].minute
                 else:
-                    log.info(f"'self.close_rate_df' is ok")
+                    self.log.info(f"'self.close_rate_df' is ok")
 
                 # 1分毎にデータが取得できていない場合
                 if len(self.close_rate_df) == 0:
@@ -768,7 +780,7 @@ class GmoTradUtil(object):
 
                 # MACD計算
                 self.macd_calculator()
-                log.info('get_close_info() 1cycle done')
+                self.log.info('get_close_info() 1cycle done')
     
 
 
@@ -803,7 +815,7 @@ class GmoTradUtil(object):
 #            self.tmp_close_rate_df = pd.concat([self.tmp_close_rate_df, tmp_df], ignore_index=True)
 
         def on_error(self, err):
-            log.critical(f'websocket api failed : [{errr}]')
+            self.log.critical(f'websocket api failed : [{errr}]')
 
         ws.on_open = on_open
         ws.on_message = on_message
@@ -832,7 +844,7 @@ class GmoTradUtil(object):
                 self.stoch_dfに取得時刻,%K, %Dの値を格納
             取得失敗: 例外を発生させる
         """
-        log.info(f'scrap_macd_stoch() called')
+        self.log.info(f'scrap_macd_stoch() called')
 
         # ヘッドレスブラウザでtradingviewのURLを開く
         try:
@@ -845,10 +857,10 @@ class GmoTradUtil(object):
             time.sleep(10)
         except Exception as e:
             driver.quit()
-            log.critical(f'cant open headless browser : [{e}]')
+            self.log.critical(f'cant open headless browser : [{e}]')
             raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
-        log.info(f'headless browser opend')
+        self.log.info(f'headless browser opend')
 
         # macd関連のデータ取得
         while True:
@@ -856,17 +868,17 @@ class GmoTradUtil(object):
                 # CSSセレクタで指定のクラスでelementを取得
                 ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
                 get_time = datetime.datetime.now()
-                log.info(f'got elements :[{ind_array}]')
+                self.log.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
                 macd_array  = ind_array[1].text.replace('−', '-').split('\n')
                 stoch_array = ind_array[2].text.split('\n')
-                log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
+                self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 文字列を数値へ変換
                 macd_array  = [int(data) for data in macd_array]
                 stoch_array = [float(data) for data in stoch_array]
-                log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
+                self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 取得時刻をリストに追加
                 macd_array.append(get_time)
@@ -881,10 +893,10 @@ class GmoTradUtil(object):
                 # 値に制限のある ストキャスティクスの値でスクレイピングの異常を検知する
                 #------------------------------------------------------------------------
                 if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
-                    log.critical(f'sotch value invalid : [{stoch_array}]')
+                    self.log.critical(f'sotch value invalid : [{stoch_array}]')
                     raise MacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
             except Exception as e:
-                log.critical(f'cant get macd stoch data : [{e}]')
+                self.log.critical(f'cant get macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
                 raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
@@ -894,7 +906,7 @@ class GmoTradUtil(object):
             stoch_stream_df_tmp  = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD','get_time'])   
             self.macd_stream_df  = pd.concat([macd_stream_df_tmp, self.macd_stream_df], ignore_index=True)
             self.stoch_stream_df = pd.concat([stoch_stream_df_tmp, self.stoch_stream_df], ignore_index=True)   
-            log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
+            self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
 
             # 1分足macd,stochのcloseデータを作成
             if macd_stream_df_tmp['get_time'].item().second == 59:
@@ -914,13 +926,13 @@ class GmoTradUtil(object):
                 self._write_csv_dataframe(df=self.macd_stream_df, path=MACD_STREAM_FILE_PATH + self.macd_stream_filename)
                 self._write_csv_dataframe(df=self.stoch_stream_df, path=STOCH_STREAM_FILE_PATH + self.stoch_stream_filename)
             except Exception as e:
-                log.critical(f'cant write macd stoch data : [{e}]')
+                self.log.critical(f'cant write macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
                 raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
             time.sleep(sleep_sec)
-            log.info(f'scraping 1cycle done')
+            self.log.info(f'scraping 1cycle done')
 
 
 
@@ -935,16 +947,16 @@ class GmoTradUtil(object):
             True :bool closeデータ作成成功
             False:bool closeデータ作成失敗             
         """
-        log.info(f'mk_close_macd() called') 
+        self.log.info(f'mk_close_macd() called') 
 
         # メンバに登録(時系列としては昇順)
         self.macd_df = pd.concat([self.macd_df, df], ignore_index=True)
-        log.info(f'close macd data make done')
+        self.log.info(f'close macd data make done')
         # ファイル出力
         try:
             self._write_csv_dataframe(df=self.macd_df, path=MACD_FILE_PATH + self.macd_filename)
         except Exception as e:
-            log.critical(f'to csv failed : [{e}]')
+            self.log.critical(f'to csv failed : [{e}]')
             return False
 
 #test
@@ -952,7 +964,7 @@ class GmoTradUtil(object):
         print(self.macd_df)
         if len(self.macd_df)  == n_row:self.macd_df.drop(index=0, inplace=True)
         del(df)
-        log.info(f'mk_close_macd() done')
+        self.log.info(f'mk_close_macd() done')
         return True
 
 
@@ -968,25 +980,25 @@ class GmoTradUtil(object):
             True :bool closeデータ作成成功
             False:bool closeデータ作成失敗
         """
-        log.info(f'mk_close_stoch() called') 
+        self.log.info(f'mk_close_stoch() called') 
 
 
         # メンバに登録(時系列としては昇順)
         self.stoch_df = pd.concat([self.stoch_df, df], ignore_index=True)
-        log.info(f'close stoch data make done')
+        self.log.info(f'close stoch data make done')
 
         # ファイル出力
         try:
             self._write_csv_dataframe(df=self.stoch_df, path=STOCH_FILE_PATH + self.stoch_filename)
         except Exception as e:
-            log.critical(f'to csv failed : [{e}]')
+            self.log.critical(f'to csv failed : [{e}]')
             return False
 #test
         print('----- stoch -----')
         print(self.stoch_df)
         if len(self.stoch_df)  == n_row:self.stoch_df.drop(index=0, inplace=True)
         del(df)
-        log.info(f'mk_close_stoch() done')
+        self.log.info(f'mk_close_stoch() done')
         return True
 
 
@@ -1012,7 +1024,7 @@ class GmoTradUtil(object):
                 閾値未満:STOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                          ※ただし閾値以上に戻ったらSTOP_NEW_TRADE ファイルを削除する
         """
-        log.info(f'is_cor_gmo_bitflyer() called')
+        self.log.info(f'is_cor_gmo_bitflyer() called')
 
         # 新規ポジションを停止させる「STOP_NEW_TRADE」を作成
         self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
@@ -1121,7 +1133,7 @@ class GmoTradUtil(object):
                 gmo_rate_sma_df      = pd.DataFrame(columns=['rate_sma'])
                 bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
                 bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
-                log.info(f'gmo and biftlyer rate array length no match. init both array')
+                self.log.info(f'gmo and biftlyer rate array length no match. init both array')
                 continue
 
 
@@ -1140,13 +1152,13 @@ class GmoTradUtil(object):
                                 相関係数:{cor}')
                         line_cnt = 0
 
-                log.info(f'gmo bitfilyer rate cor ok : [{cor}]')
+                self.log.info(f'gmo bitfilyer rate cor ok : [{cor}]')
 
             # 相関係数が閾値を下回るとSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
             else:
-                log.critical(f'gmo bitfilyer rate cor NG : [{cor}]')
+                self.log.critical(f'gmo bitfilyer rate cor NG : [{cor}]')
                 self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)
-                log.critical('stop new trad. make file {STOP_NEW_TRADE}')
+                self.log.critical('stop new trad. make file {STOP_NEW_TRADE}')
                 if line_cnt == 0:
                     self.line.send_line_notify(f'\
                             [CRITICALL]\
@@ -1170,18 +1182,97 @@ class GmoTradUtil(object):
 
 
 
-    def positioner_stoch(self):
+    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180):
         """
         * ストキャスティクスの値によりポジション判定を行う
           スクレイピングとは別プロセスなのでスクレイピングで出力したファイルを読み込み判定する
           ストキャスティクスはリアルタイムでなく1分足closeを使用する
+          ポジションが確定されたらポジションファイルを作成する
+          while文を使いたいがプロセス数が増えるためメインのポジション判定でループさせる
         * param
-            なし
+            row_thresh:int (default 20) ストキャスティクスのロング目線でのライン閾値
+            hight_thresh:int (default 80)ストキャスティクスのショート目線での閾値
+            dlt_se:int (default 180) 上記の閾値を超えてからGX、DXが生じるまでの秒。この時間未満だと判定しない
         * return
             True :bool 判定処理成功
+                       ポジションが確定されたらポジションファイルを作成する
             False:bool 判定処理失敗
+
+        * ポジションファイル命名規則(時刻は判定時刻)
+        LONG  : LONG_2021-04_05_17:29:13
+        SHORT : SHORT_2021-04_05_17:29:13
         """
-            
+        self.log.info(f'positioner_stoch() called')        
+
+
+        # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
+        try:
+            stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
+#            stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'datetime'}) 
+        except Exception as e:
+            self.log.error(f'{e}')
+            return False
+
+        # 最新のストキャスティクスを取得
+        last_stoch = stoch_df.tail(n=1).reset_index(level=0, drop=True)
+
+        # 閾値の条件以外はポジションを判定しない。条件を満たしていればメンバとして登録→これじゃだめだ
+        if row_thresh < last_stoch['pK'].values[0] < hight_thresh:
+            return True
+        else:
+            self.pos_stoch_tmp_df = last_stoch.copy()
+
+        # LONG 目線
+        if last_pK <= row_thresh:
+            # row_threshの閾値以下になった最新のストキャスティクスデータ
+            first_row_thresh_under_df = stoch_df.query(f'pK <= {row_thresh}').tail(n=1).reset_index(level=0, drop=True)
+
+            # %Kが%Dを上回る(GX)レコードで最新のものを取得
+            gx_df = stoch_df.query(f'pK > pD').tail(n=1).reset_index(level=0, drop=True)
+    
+# test
+            print(first_row_thresh_under_df)
+            print(gx_df)
+            print(gx_df['get_time'].values[0] - first_row_thresh_under_df['get_time'].values[0])
+
+            # 最新のストキャスティクスのレコードより古いレコードを取得している場合は
+            # ポジション判定できないためなにもしない
+            if gx_df['get_time'].values[0] <= first_row_thresh_under_df['get_time'].values[0]:
+                return True
+
+            # row_threshを下回った時刻からdlt_secだけ経過してればLONG判定
+            if (gx_df['get_time'].values[0] - first_row_thresh_under_df['get_time'].values[0]).seconds >= dlt_sec:
+                jdg_time_str = datetime.datetime.now().strftime('%Y-%m_%d_%H:%M:%S')
+                self.make_file(path=POSITION_STOCH_FILE_PATH, filename='LONG_' + jdg_time_str)    
+                return True
+
+        # SHORT 目線
+        elif last_pK >= hight_thresh:
+            # hight_threshの閾値以上になった最新のストキャスティクスデータ
+            first_hight_thresh_over_df = stoch_df.query(f'pK >= {hight_thresh}').tail(n=1).reset_index(level=0, drop=True)
+
+            # %Kが%Dを下回る(DX)レコードで最新のものを取得
+            dx_df = stoch_df.query(f'pK < pD').tail(n=1).reset_index(level=0, drop=True)
+
+            # 最新のストキャスティクスのレコードより古いレコードを取得している場合は
+            # ポジション判定できないためなにもしない
+            if dx_df['get_time'].values[0] <=first_hight_thresh_over_df['get_time'].values[0]:
+                return True
+
+            # hight_threshの閾値以上になった時刻からdlt_secだけ経過してればSHORT判定
+            if (dx_df['get_time'].values[0] - first_hight_thresh_over_df['get_time'].values[0]).seconds >= dlt_sec:
+                jdg_time_str = datetime.datetime.now().strftime('%Y-%m_%d_%H:%M:%S')
+                self.make_file(path=POSITION_STOCH_FILE_PATH, filename='SHORT' + jdg_time_str)    
+                return True
+
+        # row_threshとhight_threshの閾値以内はポジション判定しない
+        else:
+            self.log.info('stoch no judgement position')
+
+        self.log.info(f'positioner_stoch() done')
+        return True
+
+
 
 
 
@@ -1195,7 +1286,7 @@ class GmoTradUtil(object):
                               あるいは成行で損切りする場合もある
                               （保有しているポジションとは逆のポジションがpositionerから指示が出た場合など)
         """
-        log.info('trader() called')
+        self.log.info('trader() called')
         timestamp = datetime.datetime.now(tz=JST)
         while True:
             self.load_pos_df() # ロードするタイミングでタイムスタンプはJSTで設定されているため変換する必要無し
