@@ -26,7 +26,7 @@ def main():
             log.critical(f'{e}')
             sys.exit(1)
         except Exception as e:
-            log.error('f{e}')
+            log.error(f'{e}')
             del (trd)
             trd.init_memb()
             trd = gtu.GmoTradUtil()
