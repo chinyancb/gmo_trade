@@ -1188,6 +1188,7 @@ class GmoTradUtil(object):
           ストキャスティクスはリアルタイムでなく1分足closeを使用する
           閾値をクリアした行を基準値としてポジション判定を行う。
           基準値が確定すると基準値確定フラグがTrue、未確定の場合はFalseとする
+          ファイル出力はなくpandas上で保持。ログにはポジション情報が出力される
         * param
             row_thresh:int (default 20) ストキャスティクスのロング目線でのライン閾値
             hight_thresh:int (default 80)ストキャスティクスのショート目線での閾値
@@ -1209,6 +1210,10 @@ class GmoTradUtil(object):
         is_standard = False
 
         while True:
+#test
+            print('----- stoch -----')
+            print(self.pos_stoch_jdg_df)
+
             # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
             try:
                 stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
@@ -1218,8 +1223,14 @@ class GmoTradUtil(object):
                 continue
             self.log.info(f'stoch close data to dataframe done')        
 
+            # ストキャスティクスcloseデータが未作成の場合
+            if len(stoch_df) == 0:
+                await asyncio.sleep(sleep_sec)
+                continue
+
             # 閾値をクリアしている最新のストキャスティクスを取得
             last_stoch_df = stoch_df.tail(n=1).reset_index(level=0, drop=True)
+            self.log.info(f'last_stoch_df : [{last_stoch_df.to_json()}]')
 
             # 閾値をクリアしていなければ判定しない(既に基準値を持っている場合は基準値をクリア
             if row_thresh < last_stoch_df.at[0, 'pK'] < hight_thresh:
@@ -1290,12 +1301,121 @@ class GmoTradUtil(object):
             if len(self.pos_stoch_jdg_df) > n_row:
                 self.pos_stoch_jdg_df.drop(index=self.pos_stoch_jdg_df.index.max(), inplace=True)
 
-#test
-            print('------------------')
-            print(self.pos_stoch_jdg_df)
 
 
 
+    async def positioner_macd(self, hist_zero=100, sleep_sec=1, n_row=5):
+        """
+        * macdの情報によりポジション判定を行う
+        * param
+            hist_zero:int (default 100) 反発系での判定でヒストグラムの絶対値がこの閾値以下であればゼロとみなす
+            sleep_sec:int (default 1) スリープ秒
+            n_row:int (default 5) ポジション情報を保持するdataframeのレコード数。超えると古いものから削除する
+        * return
+            なし
+            　ポジションが確定すると下記のメンバに格納する
+              self.pos_macd_jdg_df
+        """
+        self.log.info(f'positioner_macd() called')
+        
+        # ポジション確定フラグ
+        is_position = False
+       
+
+        while True:
+
+            # macdのcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
+            try:
+                macd_df = self._read_csv_dataframe(path=MACD_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
+            except Exception as e:
+                self.log.error(f'{e}')
+                await asyncio.sleep(sleep_sec)
+                continue
+            self.log.info(f'stoch close data to dataframe done')        
+
+            # 最新のmacd情報を取得（3行）
+            tmp_macd_df = macd_df.tail(n=3).reset_index(level=0, drop=True)
+            self.log.info(f'macd data : [{tmp_macd_df.to_json()}]')
+
+            if len(tmp_macd_df) < 3:
+                await asyncio.sleep(sleep_sec)
+                continue
+
+            macd0 = tmp_macd_df['macd'][0]           
+            macd1 = tmp_macd_df['macd'][1]
+            macd2 = tmp_macd_df['macd'][2]
+
+            signal0 = tmp_macd_df['signal'][0]            
+            signal1 = tmp_macd_df['signal'][1]
+            signal2 = tmp_macd_df['signal'][2]
+
+            hist0 = tmp_macd_df['hist'][0]
+            hist1 = tmp_macd_df['hist'][1]
+            hist2 = tmp_macd_df['hist'][2]
+
+            
+            # ポジション判定
+
+            #------------------
+            # GX (LONG)
+            #------------------
+            if macd0 < signal0 and macd2 > signal2:
+
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set LONG : pattern [GX]')
+            
+            #------------------
+            # DX (SHORT)
+            #------------------
+            elif macd0 > signal0 and macd2 < signal2:
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set SHORT : pattern [DX]')
+
+            #-----------------------------
+            # シグナル上で上に反発（LONG）
+            #-----------------------------
+            elif ((macd1 < macd0) and (macd1 < macd2)) and ((hist0 > hist_zero) and (abs(hist1) < hist_zero) and (hist2 > hist_zero)):
+
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set LONG : pattern [rebound LONG]')
+
+            #-----------------------------
+            # シグナル上で下に反発（SHORT）
+            #-----------------------------
+            elif ((macd1 > macd0) and (macd1 > macd2)) and ((hist0 < -hist_zero) and (abs(hist1) < hist_zero) and (hist2 < -hist_zero)):
+
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set SHORT : pattern [rebound SHORT]')
+
+            else:
+                self.log.info('no position stat')
+                is_position = False
+
+
+            # ポジションデータが一定数超えたら古いものから削除
+            if len(self.pos_macd_jdg_df.index) > n_row:
+                self.pos_macd_jdg_df.drop(index=self.pos_macd_jdg_df.index.max(), inplace=True)
+
+            await asyncio.sleep(sleep_sec)
+# test
+            print('----- macd -----')
+            print(self.pos_macd_jdg_df)
 
 
     def test_trader(self, size=0.01, n_pos=1, loss_cut_rate=40000):
