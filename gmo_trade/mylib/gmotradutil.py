@@ -96,19 +96,19 @@ class GmoTradUtil(object):
         self.stoch_stream_df  = pd.DataFrame()  # ストキャスティクスデータ格納用
         self.macd_df          = pd.DataFrame()  # macd確定値データ格納用
         self.stoch_df         = pd.DataFrame()  # ストキャスティクス確定値データ格納用
-        self.pos_jdg_df       = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
-        self.pos_macd_jdg_df  = pd.DataFrame([{'main_pos':'STAY', 'sup_pos':'STAY', 'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
-        self.pos_stoch_tmp_df = pd.DataFrame()  # ポジション計算用データフレーム
+        self.pos_jdg_df       = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
+        self.pos_macd_jdg_df  = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
+        self.pos_stoch_jdg_df = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
 
         # ファイル関連
-        self.close_filename        = f"close_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
-        self.macd_filename         = f"macd_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"        # macdデータの書き出しファイル名
-        self.macd_stream_filename  = f"macd_stream{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"  # macd1秒データの書き出しファイル名
-        self.stoch_filename        = f"stoch_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"       # ストキャスティクスデータの書き出しファイル名
-        self.stoch_stream_filename = f"stoch_stream{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}" # ストキャスティクス1秒データの書き出しファイル名
-        self.pos_filename          = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # ポジションデータの書き出しファイル名
-        self.pos_macd_filename     = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # macdによるポジションデータの書き出しファイル名
-        self.pos_stoch_filename    = f"pos_{datetime.datetime.now(tz=JST).strftime('%Y-%m-%d-%H:%M')}"         # ストキャスティクスによるポジションデータの書き出しファイル名
+        self.close_filename        = f"close_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
+        self.macd_filename         = f"macd_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"        # macdデータの書き出しファイル名
+        self.macd_stream_filename  = f"macd_stream{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"  # macd1秒データの書き出しファイル名
+        self.stoch_filename        = f"stoch_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # ストキャスティクスデータの書き出しファイル名
+        self.stoch_stream_filename = f"stoch_stream{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}" # ストキャスティクス1秒データの書き出しファイル名
+        self.pos_filename          = f"pos_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"         # ポジションデータの書き出しファイル名
+        self.pos_macd_filename     = f"pos_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"         # macdによるポジションデータの書き出しファイル名
+        self.pos_stoch_filename    = f"pos_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"         # ストキャスティクスによるポジションデータの書き出しファイル名
 
         # フラグ関連
         self.is_div         = False                                       # ダイバージェンスが発生していればTrue,起きていなければFalse 
@@ -132,7 +132,6 @@ class GmoTradUtil(object):
         # ロギング
         LOG_CONF = app_home + '/etc/conf/logging.conf'
         logging.config.fileConfig(LOG_CONF)
-        print(qualname)
         self.log = logging.getLogger(qualname)
 
     def init_memb(self):
@@ -161,7 +160,7 @@ class GmoTradUtil(object):
         self.log.info(f'init_position() called')
         try:
             pos_jdg_tmp_df = pd.DataFrame([{'main_pos':'STAY','sup_pos':'STAY',
-                'jdg_timestamp':datetime.datetime.now(tz=JST)}])  # ポジション計算用データフレーム
+                'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
         except Exception as e:
             self.log.critical(f'ポジションの初期化に失敗しました : [{e}]')
             return False
@@ -669,7 +668,7 @@ class GmoTradUtil(object):
                 # 100カウントで取得できない場合は現在時刻,レートは-1を返す(暫定対応)
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                 self.log.warning(f'not found close rate in 100 length js.')
-                close_timestamp = datetime.datetime.now(tz=JST) + datetime.timedelta(seconds=120)
+                close_timestamp = datetime.datetime.now() + datetime.timedelta(seconds=120)
                 return {'close_timestamp' : close_timestamp, 'close_rate' : -1}        
 
             break # while文を抜ける
@@ -698,7 +697,7 @@ class GmoTradUtil(object):
 
         while True:
 
-            cls_tm = datetime.datetime.now(tz=JST)
+            cls_tm = datetime.datetime.now()
             if cls_tm.second != 59:  
                 time.sleep(idle_sleep_sec) # 正確に時刻を取得するためtime.sleepで確実にブロッキングさせる
                 continue
@@ -1182,95 +1181,118 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180):
+    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180, sleep_sec=1, n_row=5):
         """
         * ストキャスティクスの値によりポジション判定を行う
           スクレイピングとは別プロセスなのでスクレイピングで出力したファイルを読み込み判定する
           ストキャスティクスはリアルタイムでなく1分足closeを使用する
-          ポジションが確定されたらポジションファイルを作成する
-          while文を使いたいがプロセス数が増えるためメインのポジション判定でループさせる
+          閾値をクリアした行を基準値としてポジション判定を行う。
+          基準値が確定すると基準値確定フラグがTrue、未確定の場合はFalseとする
         * param
             row_thresh:int (default 20) ストキャスティクスのロング目線でのライン閾値
             hight_thresh:int (default 80)ストキャスティクスのショート目線での閾値
             dlt_se:int (default 180) 上記の閾値を超えてからGX、DXが生じるまでの秒。この時間未満だと判定しない
+            sleep_sec:int (default 1) スリープ秒
+            n_row:int (default 5) ポジションデータ保持行数。超えたら古いものから削除
         * return
-            True :bool 判定処理成功
-                       ポジションが確定されたらポジションファイルを作成する
-            False:bool 判定処理失敗
-
-        * ポジションファイル命名規則(時刻は判定時刻)
-        LONG  : LONG_2021-04_05_17:29:13
-        SHORT : SHORT_2021-04_05_17:29:13
+            なし
+                ポジションが確定すると下記データフレームにポジション情報を格納する
+                また、データフレームに格納された情報をcsvファイルとして書き出す
+                self.pos_stoch_jdg_df
         """
         self.log.info(f'positioner_stoch() called')        
 
 
-        # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
-        try:
-            stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
-#            stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'datetime'}) 
-        except Exception as e:
-            self.log.error(f'{e}')
-            return False
+        # ポジション確定フラグ
+        is_position = False
+        # 基準値確定フラグ
+        is_standard = False
 
-        # 最新のストキャスティクスを取得
-        last_stoch = stoch_df.tail(n=1).reset_index(level=0, drop=True)
+        while True:
+            # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
+            try:
+                stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
+            except Exception as e:
+                self.log.error(f'{e}')
+                await asyncio.sleep(sleep_sec)
+                continue
+            self.log.info(f'stoch close data to dataframe done')        
 
-        # 閾値の条件以外はポジションを判定しない。条件を満たしていればメンバとして登録→これじゃだめだ
-        if row_thresh < last_stoch['pK'].values[0] < hight_thresh:
-            return True
-        else:
-            self.pos_stoch_tmp_df = last_stoch.copy()
+            # 閾値をクリアしている最新のストキャスティクスを取得
+            last_stoch_df = stoch_df.tail(n=1).reset_index(level=0, drop=True)
 
-        # LONG 目線
-        if last_pK <= row_thresh:
-            # row_threshの閾値以下になった最新のストキャスティクスデータ
-            first_row_thresh_under_df = stoch_df.query(f'pK <= {row_thresh}').tail(n=1).reset_index(level=0, drop=True)
+            # 閾値をクリアしていなければ判定しない(既に基準値を持っている場合は基準値をクリア
+            if row_thresh < last_stoch_df.at[0, 'pK'] < hight_thresh:
+                self.log.info(f'stoch close data not satisfy :[{last_stoch_df.at[0, "pK"]}]')
+                await asyncio.sleep(sleep_sec)
 
-            # %Kが%Dを上回る(GX)レコードで最新のものを取得
-            gx_df = stoch_df.query(f'pK > pD').tail(n=1).reset_index(level=0, drop=True)
-    
-# test
-            print(first_row_thresh_under_df)
-            print(gx_df)
-            print(gx_df['get_time'].values[0] - first_row_thresh_under_df['get_time'].values[0])
+                if is_standard == True:
+                    del(std_stoch_df)
+                    is_standard = False
+                    self.log.info(f'stoch standard data deleted')
+                continue
 
-            # 最新のストキャスティクスのレコードより古いレコードを取得している場合は
-            # ポジション判定できないためなにもしない
-            if gx_df['get_time'].values[0] <= first_row_thresh_under_df['get_time'].values[0]:
-                return True
+            # 基準値が未確定の場合は基準値として設定
+            if is_standard == False:
+                std_stoch_df = last_stoch_df
+                is_standard = True
+                await asyncio.sleep(sleep_sec)
+                continue
+            self.log.info(f"stoch standard data seted : [{std_stoch_df.at[0, 'pK']}]")
 
-            # row_threshを下回った時刻からdlt_secだけ経過してればLONG判定
-            if (gx_df['get_time'].values[0] - first_row_thresh_under_df['get_time'].values[0]).seconds >= dlt_sec:
-                jdg_time_str = datetime.datetime.now().strftime('%Y-%m_%d_%H:%M:%S')
-                self.make_file(path=POSITION_STOCH_FILE_PATH, filename='LONG_' + jdg_time_str)    
-                return True
+            # ポジション判定処理
+            # LONG目線
+            if std_stoch_df.at[0, 'pK'] <= row_thresh:
 
-        # SHORT 目線
-        elif last_pK >= hight_thresh:
-            # hight_threshの閾値以上になった最新のストキャスティクスデータ
-            first_hight_thresh_over_df = stoch_df.query(f'pK >= {hight_thresh}').tail(n=1).reset_index(level=0, drop=True)
+                # GX状態
+                if last_stoch_df.at[0, 'pK'] > last_stoch_df.at[0, 'pD']:
 
-            # %Kが%Dを下回る(DX)レコードで最新のものを取得
-            dx_df = stoch_df.query(f'pK < pD').tail(n=1).reset_index(level=0, drop=True)
+                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
+                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
 
-            # 最新のストキャスティクスのレコードより古いレコードを取得している場合は
-            # ポジション判定できないためなにもしない
-            if dx_df['get_time'].values[0] <=first_hight_thresh_over_df['get_time'].values[0]:
-                return True
+                        if is_position == False:
+                            # 時系列では降順として作成
+                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                            is_position = True
+                            self.log.info(f'position set LONG')
+                    else:
+                        is_position = False
+                else:
+                    is_position = False
 
-            # hight_threshの閾値以上になった時刻からdlt_secだけ経過してればSHORT判定
-            if (dx_df['get_time'].values[0] - first_hight_thresh_over_df['get_time'].values[0]).seconds >= dlt_sec:
-                jdg_time_str = datetime.datetime.now().strftime('%Y-%m_%d_%H:%M:%S')
-                self.make_file(path=POSITION_STOCH_FILE_PATH, filename='SHORT' + jdg_time_str)    
-                return True
 
-        # row_threshとhight_threshの閾値以内はポジション判定しない
-        else:
-            self.log.info('stoch no judgement position')
+            # SHORT目線
+            elif std_stoch_df.at[0, 'pK'] >= hight_thresh:
 
-        self.log.info(f'positioner_stoch() done')
-        return True
+                # DX状態
+                if last_stoch_df.at[0, 'pK'] < last_stoch_df.at[0, 'pD']:
+
+                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
+                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
+
+                        if is_position == False:
+                            # 時系列では降順として作成
+                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                            is_position = True
+                            self.log.info(f'position set SHORT')
+
+                    else:
+                        is_position = False
+                else:
+                    is_position = False
+
+
+            await asyncio.sleep(sleep_sec)
+
+            # ポジション格納データフレームの行数が一定数超えたら古いものから削除
+            if len(self.pos_stoch_jdg_df) > n_row:
+                self.pos_stoch_jdg_df.drop(index=self.pos_stoch_jdg_df.index.max(), inplace=True)
+
+#test
+            print('------------------')
+            print(self.pos_stoch_jdg_df)
 
 
 
@@ -1287,7 +1309,7 @@ class GmoTradUtil(object):
                               （保有しているポジションとは逆のポジションがpositionerから指示が出た場合など)
         """
         self.log.info('trader() called')
-        timestamp = datetime.datetime.now(tz=JST)
+        timestamp = datetime.datetime.now()
         while True:
             self.load_pos_df() # ロードするタイミングでタイムスタンプはJSTで設定されているため変換する必要無し
             if len(self.pos_jdg_df) == 0:
