@@ -50,6 +50,7 @@ MACD_FILE_PATH           = app_home + '/var/share/macd/'         # MACD1分CLOSE
 MACD_STREAM_FILE_PATH    = app_home + '/var/share/macd_stream/'  # MACD1秒
 STOCH_FILE_PATH          = app_home + '/var/share/stoch/'        # ストキャスティクス1分CLOSE(ニアリーイコール)
 STOCH_STREAM_FILE_PATH   = app_home + '/var/share/stoch_stream/' # ストキャスティクス1秒値
+POSITION_FILE_PATH       = app_home + '/var/share/pos/'          # ポジション判定結果
 POSITION_MACD_FILE_PATH  = app_home + '/var/share/pos/macd/'     # MACDによるポジション判定結果
 POSITION_STOCH_FILE_PATH = app_home + '/var/share/pos/stoch/'    # ストキャスティクスよるポジション判定結果
 SYSCONTROL               = app_home + '/var/share/sysc/'         # システムコントロール用
@@ -68,19 +69,25 @@ JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST')
 # 自作の例外class
 class ExchangStatusGetError(Exception):
     """
-    取引所のステータスが確認できない
+    * 取引所のステータスが確認できない
     """
     pass
 
 class CloseRateGetError(Exception):
     """
-    closeレートを取得できない
+    * closeレートを取得できない
     """
     pass
 
 class MacdStochScrapGetError(Exception):
     """
-    tradingviewからスクレイピングでMACD,ストキャスティクス関連情報を取得できない
+    * tradingviewからスクレイピングでMACD,ストキャスティクス関連情報を取得できない
+    """
+    pass
+
+class PosJudgementError(Exception):
+    """
+    * ポジション判定でのエラー
     """
     pass
 
@@ -266,7 +273,7 @@ class GmoTradUtil(object):
 
     def _get_file_name(self, path, prefix='hist'):
         """
-        * 指定されたディレクトリパス,prefixに当てはまるファイル名を取得
+        * 指定されたディレクトリパス,prefixに当てはまる最新のファイル名を取得
         * 主にポジション判定のヒストグラムの閾値変更のために使用する
         * param
             path:str 取得するファイルが置かれているディレクトリ名(末尾に/を付けて指定)
@@ -1041,8 +1048,8 @@ class GmoTradUtil(object):
         gmo_retry_cnt  = 0
         bitf_retry_cnt = 0
 
-        # LINE通知カウント用変数
-        line_cnt = 0
+        # LINE通知用フラグ
+        is_line = False
 
         while True:
 
@@ -1055,17 +1062,18 @@ class GmoTradUtil(object):
                 # リトライ
                 time.sleep(retry_sleep_sec) 
                 gmo_retry_cnt += 1
+                self.log.info(f'_get_rate() retry. retry count : [{gmo_retry_cnt}]')
                 continue
 
                 # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                 if gmo_retry_cnt > retry_thresh:
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
-                    if line_cnt == 0:
+                    if is_line == False:
                         self.line.send_line_notify(f'\
                                 [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
-                        line_cnt += 1
+                        is_line = True
                     # dataframe、リトライカウント用変数を初期化
                     gmo_rate_df     = pd.DataFrame(columns=['rate'])
                     gmo_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
@@ -1097,12 +1105,12 @@ class GmoTradUtil(object):
                 # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                 if bitf_retry_cnt > retry_thresh:
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) 
-                    if line_cnt == 0:
+                    if is_line == False:
                         self.line.send_line_notify(f'\
                                 [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
-                        line_cnt += 1
+                        is_line = True
                     # dataframe、リトライカウント初期化
                     bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
                     bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
@@ -1143,13 +1151,13 @@ class GmoTradUtil(object):
             if cor >= cor_thresh:
                 # ポジション停止ファイルがあった場合は削除する
                 if self.rm_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) == True:
-                    if line_cnt == 1:
+                    if is_line == False:
                         self.line.send_line_notify(f'\
                                 [INFO]\
                                 GMOコインとビットフライヤーでトレンドの相関が確認できました。\
                                 新規ポジション作成可能状態にします。\
                                 相関係数:{cor}')
-                        line_cnt = 0
+                        is_line = True
 
                 self.log.info(f'gmo bitfilyer rate cor ok : [{cor}]')
 
@@ -1158,13 +1166,13 @@ class GmoTradUtil(object):
                 self.log.critical(f'gmo bitfilyer rate cor NG : [{cor}]')
                 self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)
                 self.log.critical('stop new trad. make file {STOP_NEW_TRADE}')
-                if line_cnt == 0:
+                if is_line == False:
                     self.line.send_line_notify(f'\
                             [CRITICALL]\
                             GMOコインとビットフライヤーでトレンドの相関が崩れました。\
                             新規ポジションを停止状態にします。\
                             相関係数:{cor}')
-                    line_cnt += 1
+                    is_line = True
 
             # 配列の長さが閾値を超えると古いものを削除(メモリ削減のため)
             if len(gmo_rate_df) > len_thresh: gmo_rate_df.drop(index=0, inplace=True)
@@ -1304,11 +1312,12 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner_macd(self, hist_zero=100, sleep_sec=1, n_row=5):
+    async def positioner_macd(self, hist_zero=100, kms_thresh=-376000, sleep_sec=1, n_row=5):
         """
         * macdの情報によりポジション判定を行う
         * param
             hist_zero:int (default 100) 反発系での判定でヒストグラムの絶対値がこの閾値以下であればゼロとみなす
+            kms_thresh:int MACDとシグナルの傾きの積の閾値(オリジナル指標).閾値以下の場合GX or DX間近
             sleep_sec:int (default 1) スリープ秒
             n_row:int (default 5) ポジション情報を保持するdataframeのレコード数。超えると古いものから削除する
         * return
@@ -1352,6 +1361,18 @@ class GmoTradUtil(object):
             hist0 = tmp_macd_df['hist'][0]
             hist1 = tmp_macd_df['hist'][1]
             hist2 = tmp_macd_df['hist'][2]
+
+            # MACDとシグナルの傾き
+            kmd1 = (macd1 - macd0) / 1
+            kmd2 = (macd2 - macd1) / 1
+
+            ksg1 = (signal1 - signal0) / 1
+            ksg2 = (signal2 - signal1) / 1
+
+            # MACDとシグナルの傾きの積（オリジナル指標）
+            kms1 = kmd1 * ksg1
+            kms2 = kmd2 * ksg2
+            self.log.info(f'kms1 : [{kms1}] kms2 : [{kms2}]')
 
             
             # ポジション判定
@@ -1402,6 +1423,28 @@ class GmoTradUtil(object):
                     self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
                     is_position = True
                     self.log.info(f'position set SHORT : pattern [rebound SHORT]')
+            
+            #------------------------------
+            # GX間近(オリジナル指標を使用)
+            #------------------------------
+            elif ((hist0 < 0) and (hist1 < 0) and (hist2 < 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set LONG : pattern [nearness GX]')
+
+            #------------------------------
+            # DX間近(オリジナル指標を使用)
+            #------------------------------
+            elif ((hist0 > 0) and (hist1 > 0) and (hist2 > 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
+                # 時系列では降順として作成
+                if is_position == False:
+                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+                    is_position = True
+                    self.log.info(f'position set SHORT : pattern [nearness DX]')
 
             else:
                 self.log.info('no position stat')
@@ -1416,6 +1459,79 @@ class GmoTradUtil(object):
 # test
             print('----- macd -----')
             print(self.pos_macd_jdg_df)
+
+
+
+    async def positioner(self, path=POSITION_FILE_PATH, dlt_sec=180, n_row=3, sleep_sec=1):
+        """
+        * ストキャスティクスとMACDから判定されたポジションをもとに
+        　最終のポジションを判定する。
+        　この最終のポジションが確定しないとトレードしない
+          ポジション確定した場合、指定されたディレクトリ配下にポジション情報をファイル名とした空ファイルを作成
+        * param
+            path=
+            dlt_sec:int (default 180)
+            n_row:int (default 3) ポジションデータ保持数。超えると古い順に削除される
+            sleep_sec:int (default 1) スリープ秒
+        * return
+            なし
+                ポジション確定の場合:self.pos_jdg_dfにポジション情報を格納し、
+                                     指定されたディレクトリ配下にポジション情報をファイル名とした空ファイルを作成
+                                     ファイルが作成できない場合は例外を発生させる
+                                     * ファイル名の例
+                                     {position}_{jdg_timestamp} ※「T」が入ることに注意
+                                     LONG_2021-04-07T17:59:18.037976
+                ポジション未確定の場合:pass
+        * Exception
+            PosJudgementError
+        """
+        # ライン通知用（テスト)
+        is_line = False
+
+        while True:
+            self.log.info('positioner() called') 
+            await asyncio.sleep(sleep_sec)
+            
+            # 各ポジションを読み込む
+            pos_macd  = self.pos_macd_jdg_df.head(n=1)
+            pos_stoch = self.pos_stoch_jdg_df.head(n=1)
+            
+            # ポジションが未確定の場合はcontinue
+            if pos_stoch['position'][0] == 'STAY':
+                self.log.info(f'stoch no position stat : [{pos_stoch.to_json()}]')  
+                continue
+
+            if pos_macd['position'][0] == 'STAY':
+                self.log.info(f'macd no position stat : [{pos_macd.to_json()}]')  
+                continue
+             
+            # MACDとストキャスティクスのポジションでない場合はcontinue
+            if pos_stoch['position'][0] != pos_macd['position'][0]:
+                self.log.info(f"macd stoch not same position. macd :[{pos_stoch['position'][0]}] stoch :[{pos_macd['position'][0]}]")
+                is_line = False
+                continue
+
+            # 各ポジション判定時間が閾値を超えている場合はcontinue
+            dlt_jdg_timestamp = pos_macd['jdg_timestamp'][0] - pos_stoch['jdg_timestamp'][0]
+            if dlt_jdg_timestamp.seconds >= dlt_sec and dlt_jdg_timestamp.seconds <= -dlt_sec:
+                self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
+                is_line = False
+                continue
+
+            # ポジションデータを指定されたディレクトリ配下に空ファイルとして作成
+            filename = pos_stoch['position'][0] + '_' + datetime.datetime.now().isoformat()
+#test
+            if is_line == False:
+                self.line.send_line_notify(f'[INFO]\
+                        ポジション確定しました。↓\
+                        position : [{filename}]')
+                is_line = True
+#test
+            if self.make_file(path=path, filename=filename) == False:
+                self.log.critical(f'cant make position file. path : [{path}]')
+                raise PosJudgementError(f'cant make position file. path : [{path}]')
+            continue
+
 
 
     def test_trader(self, size=0.01, n_pos=1, loss_cut_rate=40000):
