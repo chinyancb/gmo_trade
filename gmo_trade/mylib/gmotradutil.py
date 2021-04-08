@@ -1189,7 +1189,6 @@ class GmoTradUtil(object):
 
 
 
-#    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180, sleep_sec=1, n_row=5):
     async def positioner_stoch(self, row_thresh=20, hight_thresh=80, sleep_sec=1, n_row=5):
         """
         * ストキャスティクスの値によりポジション判定を行う
@@ -1247,27 +1246,34 @@ class GmoTradUtil(object):
 
             # ポジション判定処理
             # LONG目線
-            if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
-                if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
+            if last_stoch_df['pK'][0] <= row_thresh:
+                if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
+                    if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
 
-                    if is_position == False:
-                        # 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        is_position = True
-                        self.log.info(f'position set LONG')
+                        if is_position == False:
+                            # 時系列では降順として作成
+                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                            is_position = True
+                            self.log.info(f'position set LONG')
+                    else:
+                        is_position = False
                 else:
                     is_position = False
            
-            elif last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
-                if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
+            # SHORT目線
+            elif last_stoch_df['pK'][0] >= hight_thresh:
+                if last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
+                    if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
 
-                    if is_position == False:
-                        # 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        is_position = True
-                        self.log.info(f'position set SHORT')
+                        if is_position == False:
+                            # 時系列では降順として作成
+                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                            is_position = True
+                            self.log.info(f'position set SHORT')
+                    else:
+                        is_position = False
                 else:
                     is_position = False
             else:
@@ -1524,15 +1530,16 @@ class GmoTradUtil(object):
             if pos_stoch['position'][0] != pos_macd['position'][0]:
                 self.log.info(f"macd stoch not same position. macd :[{pos_stoch['position'][0]}] stoch :[{pos_macd['position'][0]}]")
                 is_line = False
-                is_position = True
+                is_position = False 
                 continue
 
             # 各ポジション判定時間が閾値を超えている場合はcontinue
             dlt_jdg_timestamp = pos_macd['jdg_timestamp'][0] - pos_stoch['jdg_timestamp'][0]
+            self.log.debug(f'dlt_jdg_timestamp.seconds : [{dlt_jdg_timestamp.seconds}]')
             if dlt_jdg_timestamp.seconds >= dlt_sec and dlt_jdg_timestamp.seconds <= -dlt_sec:
                 self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
                 is_line = False
-                is_position = True
+                is_position = False
                 continue
 
             # ポジションデータを指定されたディレクトリ配下に空ファイルとして作成
