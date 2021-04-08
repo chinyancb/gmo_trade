@@ -1189,7 +1189,8 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180, sleep_sec=1, n_row=5):
+#    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, dlt_sec=180, sleep_sec=1, n_row=5):
+    async def positioner_stoch(self, row_thresh=20, hight_thresh=80, sleep_sec=1, n_row=5):
         """
         * ストキャスティクスの値によりポジション判定を行う
           スクレイピングとは別プロセスなのでスクレイピングで出力したファイルを読み込み判定する
@@ -1209,15 +1210,13 @@ class GmoTradUtil(object):
                 また、データフレームに格納された情報をcsvファイルとして書き出す
                 self.pos_stoch_jdg_df
         """
-        self.log.info(f'positioner_stoch() called')        
 
 
         # ポジション確定フラグ
         is_position = False
-        # 基準値確定フラグ
-        is_standard = False
 
         while True:
+            self.log.info(f'positioner_stoch() called')        
 #test
             print('----- stoch -----')
             print(self.pos_stoch_jdg_df)
@@ -1236,73 +1235,86 @@ class GmoTradUtil(object):
                 await asyncio.sleep(sleep_sec)
                 continue
 
-            # 閾値をクリアしている最新のストキャスティクスを取得
-            last_stoch_df = stoch_df.tail(n=1).reset_index(level=0, drop=True)
+            # 最新(2行)のストキャスティクスを取得
+            last_stoch_df = stoch_df.tail(n=2).reset_index(level=0, drop=True)
             self.log.info(f'last_stoch_df : [{last_stoch_df.to_json()}]')
 
-            # 閾値をクリアしていなければ判定しない(既に基準値を持っている場合は基準値をクリア
+            # 閾値をクリアしていなければ判定しない
             if row_thresh < last_stoch_df.at[0, 'pK'] < hight_thresh:
                 self.log.info(f'stoch close data not satisfy :[{last_stoch_df.at[0, "pK"]}]')
                 await asyncio.sleep(sleep_sec)
-
-                if is_standard == True:
-                    del(std_stoch_df)
-                    is_standard = False
-                    self.log.info(f'stoch standard data deleted')
                 continue
-
-            # 基準値が未確定の場合は基準値として設定
-            if is_standard == False:
-                std_stoch_df = last_stoch_df
-                is_standard = True
-                await asyncio.sleep(sleep_sec)
-                continue
-            self.log.info(f"stoch standard data seted : [{std_stoch_df.at[0, 'pK']}]")
 
             # ポジション判定処理
             # LONG目線
-            if std_stoch_df.at[0, 'pK'] <= row_thresh:
+            if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
+                if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
 
-                # GX状態
-                if last_stoch_df.at[0, 'pK'] > last_stoch_df.at[0, 'pD']:
-
-                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
-                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
-
-                        if is_position == False:
-                            # 時系列では降順として作成
-                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                            is_position = True
-                            self.log.info(f'position set LONG')
-                    else:
-                        is_position = False
+                    if is_position == False:
+                        # 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        is_position = True
+                        self.log.info(f'position set LONG')
                 else:
                     is_position = False
+           
+            elif last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
+                if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
 
-
-            # SHORT目線
-            elif std_stoch_df.at[0, 'pK'] >= hight_thresh:
-
-                # DX状態
-                if last_stoch_df.at[0, 'pK'] < last_stoch_df.at[0, 'pD']:
-
-                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
-                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
-
-                        if is_position == False:
-                            # 時系列では降順として作成
-                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                            is_position = True
-                            self.log.info(f'position set SHORT')
-
-                    else:
-                        is_position = False
+                    if is_position == False:
+                        # 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        is_position = True
+                        self.log.info(f'position set SHORT')
                 else:
                     is_position = False
-
-
+            else:
+                is_position = False
+#            # LONG目線
+#            if std_stoch_df.at[0, 'pK'] <= row_thresh:
+#
+#                # GX状態
+#                if last_stoch_df.at[0, 'pK'] > last_stoch_df.at[0, 'pD']:
+#
+#                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
+#                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
+#
+#                        if is_position == False:
+#                            # 時系列では降順として作成
+#                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+#                            is_position = True
+#                            self.log.info(f'position set LONG')
+#                    else:
+#                        is_position = False
+#                else:
+#                    is_position = False
+#
+#
+#            # SHORT目線
+#            elif std_stoch_df.at[0, 'pK'] >= hight_thresh:
+#
+#                # DX状態
+#                if last_stoch_df.at[0, 'pK'] < last_stoch_df.at[0, 'pD']:
+#
+#                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
+#                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
+#
+#                        if is_position == False:
+#                            # 時系列では降順として作成
+#                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+#                            is_position = True
+#                            self.log.info(f'position set SHORT')
+#
+#                    else:
+#                        is_position = False
+#                else:
+#                    is_position = False
+#
+#
             await asyncio.sleep(sleep_sec)
 
             # ポジション格納データフレームの行数が一定数超えたら古いものから削除
@@ -1462,7 +1474,7 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner(self, path=POSITION_FILE_PATH, dlt_sec=180, n_row=3, sleep_sec=1):
+    async def positioner(self, path=POSITION_FILE_PATH, dlt_sec=185, n_row=3, sleep_sec=1):
         """
         * ストキャスティクスとMACDから判定されたポジションをもとに
         　最終のポジションを判定する。
@@ -1488,6 +1500,9 @@ class GmoTradUtil(object):
         # ライン通知用（テスト)
         is_line = False
 
+        # ポジション確定フラグ
+        is_position = False
+
         while True:
             self.log.info('positioner() called') 
             await asyncio.sleep(sleep_sec)
@@ -1509,6 +1524,7 @@ class GmoTradUtil(object):
             if pos_stoch['position'][0] != pos_macd['position'][0]:
                 self.log.info(f"macd stoch not same position. macd :[{pos_stoch['position'][0]}] stoch :[{pos_macd['position'][0]}]")
                 is_line = False
+                is_position = True
                 continue
 
             # 各ポジション判定時間が閾値を超えている場合はcontinue
@@ -1516,6 +1532,7 @@ class GmoTradUtil(object):
             if dlt_jdg_timestamp.seconds >= dlt_sec and dlt_jdg_timestamp.seconds <= -dlt_sec:
                 self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
                 is_line = False
+                is_position = True
                 continue
 
             # ポジションデータを指定されたディレクトリ配下に空ファイルとして作成
@@ -1527,9 +1544,11 @@ class GmoTradUtil(object):
                         position : [{filename}]')
                 is_line = True
 #test
-            if self.make_file(path=path, filename=filename) == False:
-                self.log.critical(f'cant make position file. path : [{path}]')
-                raise PosJudgementError(f'cant make position file. path : [{path}]')
+            if is_position == False:
+                if self.make_file(path=path, filename=filename) == False:
+                    self.log.critical(f'cant make position file. path : [{path}]')
+                    raise PosJudgementError(f'cant make position file. path : [{path}]')
+                is_position = True
             continue
 
 
