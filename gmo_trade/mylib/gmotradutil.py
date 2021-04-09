@@ -130,10 +130,8 @@ class GmoTradUtil(object):
         # Line通知用
         self.line = LineUtil()
 
-        # self.logging設定
-        self.log = self.set_logging(qualname='gmotradeUtil')
 
-    
+        self.set_logging() 
         
     def set_logging(self, qualname='gmotradeUtil'):
         """
@@ -141,12 +139,13 @@ class GmoTradUtil(object):
         * param
             qualname:str (default 'gmotradeUtil') self.loging.confで設定した名前
         * return
-            なし。設定が成功するとself.logに設定されたロガーが格納される
+            self.log:Logger 設定が成功するとself.logに設定されたロガーが格納される
         """
         # ロギング
         LOG_CONF = app_home + '/etc/conf/logging.conf'
         logging.config.fileConfig(LOG_CONF)
         self.log = logging.getLogger(qualname)
+        return self.log
 
     def init_memb(self):
         """
