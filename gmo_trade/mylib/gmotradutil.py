@@ -23,6 +23,10 @@ import asyncio
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import chromedriver_binary
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from mylib.lineutil import LineUtil
 from mylib.bitfilyertradutil import BitfilyerTradUtil
 #from  mylib.websocketutil import WebSocketUtil
@@ -79,7 +83,7 @@ class CloseRateGetError(Exception):
     """
     pass
 
-class MacdStochScrapGetError(Exception):
+class CloseMacdStochScrapGetError(Exception):
     """
     * tradingviewからスクレイピングでMACD,ストキャスティクス関連情報を取得できない
     """
@@ -98,7 +102,9 @@ class GmoTradUtil(object):
     def __init__(self): 
 
         # データ関連
+        self.ind_df           = pd.DataFrame()  # レート,MACD,ストキャスティクスデータ格納用
         self.close_rate_df    = pd.DataFrame()  # closeレート格納用
+        self.bitf_rate_df     = pd.DataFrame()  # ビットフライヤーのレート情報
         self.macd_stream_df   = pd.DataFrame()  # macdリアルタイムデータ格納用
         self.stoch_stream_df  = pd.DataFrame()  # ストキャスティクスデータ格納用
         self.macd_df          = pd.DataFrame()  # macd確定値データ格納用
@@ -109,6 +115,7 @@ class GmoTradUtil(object):
 
         # ファイル関連
         self.close_filename        = f"close_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
+        self.bitf_rate_filename    = f"close_bitf{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
         self.macd_filename         = f"macd_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"        # macdデータの書き出しファイル名
         self.macd_stream_filename  = f"macd_stream{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"  # macd1秒データの書き出しファイル名
         self.stoch_filename        = f"stoch_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # ストキャスティクスデータの書き出しファイル名
@@ -836,6 +843,154 @@ class GmoTradUtil(object):
 
 
 
+    def scrap_macd_stoch_close15m(self, sleep_sec=5, n_row=10):
+        """
+        * tradingviewの自作のチャートから15分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
+          →https://jp.tradingview.com/chart/wTJWkxIA/
+           !!!15分足、ウォッチリスト表示の形式でチャートが保存されていることが前提
+        * param
+            sleep_sec:int (default 5) sleep秒
+            n_row:int (default 10) データを保持する行数。超えると古いものから削除される
+        * return 
+            なし
+                データ取得成功 :self.ind_dfにデータ時系列で降順で格納される
+                データ取得失敗 :下記例外を発生させる
+                                CloseMacdStochScrapGetError
+        """
+        # 始値で1分以内に複数回ループすることを防ぐ
+        open_rate_tmp = 0
+
+        while True:
+            self.log.info(f'scrap_macd_stoch_close15m() called')
+
+            # ブラウザ立ち上げ
+            try:
+                options = webdriver.ChromeOptions()
+                options.add_argument('--headless')
+                driver = webdriver.Chrome(options=options)
+                driver.set_window_size(1200, 900)
+                driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'chart-gui-wrapper')))
+
+                # マウスオーバー
+                chart = driver.find_element_by_class_name('chart-gui-wrapper')
+                actions = ActionChains(driver)
+                actions.move_to_element(chart)
+                actions.move_by_offset(310, 100)
+                actions.perform()
+
+            except Exception as e:
+                self.log.critical(f'{e}')
+                driver.quit()
+                raise CloseMacdStochScrapGetError(f'browser set error :[{e}]')
+
+            self.log.info(f'browser set up done')
+
+            # スクレイピング(15分間隔で実行)
+            if datetime.datetime.now().minute not in [0, 15, 30, 45]:
+                driver.quit()
+                time.sleep(sleep_sec) 
+                self.log.info(f'not scraping time. browser closed')
+                continue
+            try:
+                # CSSセレクタで指定のクラスでelementを取得
+                ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
+                get_time = datetime.datetime.now()
+                self.log.info(f'got elements :[{ind_array}]')
+
+                # レートの値を取得
+                rate_str = ind_array[0].text
+                self.log.debug(f'rate_str : [{rate_str}]')
+                open_rate  = int(rate_str.split('始値')[1].split('高値')[0])
+                high_rate  = int(rate_str.split('高値')[1].split('安値')[0])
+                low_rate   = int(rate_str.split('安値')[1].split('終値')[0])
+                close_rate_str = rate_str.split('終値')[1].split('終値')[0]
+                close_rate = int(re.split('[+|−]', close_rate_str)[0])
+                rate_array = [open_rate, high_rate, low_rate, close_rate] 
+
+                # 同じ値だったらcontinue
+                if open_rate_tmp == open_rate:
+                    driver.quit()
+                    time.sleep(sleep_sec) 
+                    continue
+                open_rate_tmp = open_rate
+
+                # MACDとストキャスティクスをリストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
+                macd_array  = ind_array[1].text.replace('−', '-').split('\n')
+                stoch_array = ind_array[2].text.split('\n')
+                self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
+
+                # 文字列を数値へ変換
+                macd_array  = [int(data) for data in macd_array]
+                stoch_array = [float(data) for data in stoch_array]
+                self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
+
+                # 取得時刻をリストに追加
+                rate_array.append(get_time)
+                macd_array.append(get_time)
+                stoch_array.append(get_time)
+
+                # numpyのndarrayに変換
+                rate_array  = np.array(rate_array)
+                macd_array  = np.array(macd_array) 
+                stoch_array = np.array(stoch_array)
+
+                #------------------------------------------------------------------------
+                # tradingview側でHTMLの変更があった場合に備えて
+                # 値に制限のある ストキャスティクスの値でスクレイピングの異常を検知する
+                #------------------------------------------------------------------------
+                if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
+                    self.log.critical(f'sotch value invalid : [{stoch_array}]')
+                    raise CloseMacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
+            except Exception as e:
+                self.log.critical(f'cant get macd stoch data : [{e}]')
+                driver.quit()
+                self.init_memb()
+                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+            except KeyboardInterrupt:
+                driver.quit()
+                sys.exit(1)
+           
+            # ブラウザ閉じる
+            driver.quit()
+            self.log.info(f'browser closed')
+            
+
+            # データフレームとして作成しメンバーに登録(時系列では降順として作成)
+            bitf_rate_df_tmp = pd.DataFrame(rate_array.reshape(1, 5), columns=['open', 'high', 'low', 'close', 'get_time'])    
+            macd_df_tmp     = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
+            stoch_df_tmp    = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD', 'get_time'])   
+            self.bitf_rate_df = pd.concat([self.bitf_rate_df, bitf_rate_df_tmp], ignore_index=True)
+            self.macd_df  = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
+            self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)   
+            self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
+
+            # ファイル書き出し
+            try:
+                self._write_csv_dataframe(df=self.bitf_rate_df, path=CLOSE_RATE_FILE_PATH + self.bitf_rate_filename)
+                self._write_csv_dataframe(df=self.macd_df,      path=MACD_FILE_PATH       + self.macd_filename)
+                self._write_csv_dataframe(df=self.stoch_df,     path=STOCH_FILE_PATH      + self.stoch_filename)
+            except Exception as e:
+                self.log.critical(f'cant write macd stoch data : [{e}]')
+                driver.quit()
+                self.init_memb()
+                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+            self.log.info(f'dataframe to csv write done')
+
+
+            # データフレームが一定行数超えたら古い順から削除
+            if len(self.bitf_rate_df) > n_row: self.bitf_rate_df.drop(index=self.bitf_rate_df.index.max())
+            if len(self.macd_df)      > n_row: self.macd_df.drop(index=self.macd_df.index.max())
+            if len(self.stoch_df)     > n_row: self.stoch_df.drop(index=self.stoch_df.index.max())
+
+# test
+            print(self.bitf_rate_df)
+            print(self.macd_df)
+            print(self.stoch_df)
+# test
+
+
+
     def scrap_macd_stoch(self, sleep_sec=1, n_row=65):
         """
         *tradingviewの自作のチャートからmacd,ストキャスティクスの値を取得する
@@ -864,7 +1019,7 @@ class GmoTradUtil(object):
         except Exception as e:
             driver.quit()
             self.log.critical(f'cant open headless browser : [{e}]')
-            raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
+            raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
         self.log.info(f'headless browser opend')
 
@@ -900,12 +1055,16 @@ class GmoTradUtil(object):
                 #------------------------------------------------------------------------
                 if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
                     self.log.critical(f'sotch value invalid : [{stoch_array}]')
-                    raise MacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
+                    raise CloseMacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
             except Exception as e:
                 self.log.critical(f'cant get macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
-                raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
+                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+            except KeyboardInterrupt:
+                driver.quit()
+                self.init_memb()
+                sys.exit(1)
 
             # データフレームとして作成しメンバーに登録(時系列では降順として作成)
             macd_stream_df_tmp   = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
@@ -935,7 +1094,7 @@ class GmoTradUtil(object):
                 self.log.critical(f'cant write macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
-                raise MacdStochScrapGetError(f'cant open headless browser : [{e}]')
+                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
 
             time.sleep(sleep_sec)
             self.log.info(f'scraping 1cycle done')
@@ -1536,11 +1695,18 @@ class GmoTradUtil(object):
             # 各ポジション判定時間が閾値を超えている場合はcontinue
             dlt_jdg_timestamp = pos_macd['jdg_timestamp'][0] - pos_stoch['jdg_timestamp'][0]
             self.log.debug(f'dlt_jdg_timestamp.seconds : [{dlt_jdg_timestamp.seconds}]')
-            if dlt_jdg_timestamp.seconds >= dlt_sec and dlt_jdg_timestamp.seconds <= -dlt_sec:
-                self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
-                is_line = False
-                is_position = False
-                continue
+            if dlt_jdg_timestamp.seconds > 0:
+                if dlt_jdg_timestamp.seconds > dlt_sec:
+                    self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
+                    is_line = False
+                    is_position = False
+                    continue
+            else:
+                if dlt_jdg_timestamp.seconds < dlt_sec:
+                    self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
+                    is_line = False
+                    is_position = False
+                    continue
 
             # ポジションデータを指定されたディレクトリ配下に空ファイルとして作成
             filename = pos_stoch['position'][0] + '_' + datetime.datetime.now().isoformat()
@@ -1560,9 +1726,9 @@ class GmoTradUtil(object):
 
 
 
-    def test_trader(self, size=0.01, n_pos=1, loss_cut_rate=40000):
+    def trader(self, size=0.01, n_pos=1, loss_cut_rate=40000):
         """
-        * トレードを行う
+        * ポジションファイルを読み込みトレードを行う
         * param
             size:float or int ロット数(default 0.01)
             n_pos:int (default 1) ポジション数。これ以上のポジションは持たない
@@ -1570,37 +1736,10 @@ class GmoTradUtil(object):
                               あるいは成行で損切りする場合もある
                               （保有しているポジションとは逆のポジションがpositionerから指示が出た場合など)
         """
-        self.log.info('trader() called')
-        timestamp = datetime.datetime.now()
         while True:
-            self.load_pos_df() # ロードするタイミングでタイムスタンプはJSTで設定されているため変換する必要無し
-            if len(self.pos_jdg_df) == 0:
-                # asyncio sleepを使う予定
-                time.sleep(10)
-                continue
-
-            # ポジション確認
-            mpos = self.pos_jdg_df['main_pos'][0]
-            spos = self.pos_jdg_df['sup_pos'][0]
-            jdg_timestamp = self.pos_jdg_df['jdg_timestamp'][0]
-            if timestamp != jdg_timestamp: 
-                if mpos == 'LONG' and spos == 'LONG':
-                    print('----------------- trader -------------------')
-                    print(f'LONG : [{self.pos_jdg_df.head(n=1)}]')
-                    print('----------------- trader -------------------')
-                    # LONGの関数を呼び出す(コルーチンを使う予定)
-                    self.line.send_line_notify(f'ポジション:[{self.pos_jdg_df.head(n=1)}]')
-
-                elif mpos == 'SHORT' and spos == 'SHORT':
-                    print('----------------- trader -------------------')
-                    print(f'SHORT : [{self.pos_jdg_df.head(n=1)}]')
-                    print('----------------- trader -------------------')
-                    # SHORTの関数を呼び出す(コルーチンを使う予定)
-                    self.line.send_line_notify(f'ポジション:[{self.pos_jdg_df.head(n=1)}]')
-                timestamp = jdg_timestamp
-            time.sleep(59)
-            continue
-            # asyncio sleepでも使う予定
+            self.log.info('trader() called')
+            
+            # ポジションファイル読み込み
 
 
 
