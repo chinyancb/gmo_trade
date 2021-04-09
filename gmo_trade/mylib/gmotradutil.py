@@ -843,13 +843,15 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close15m(self, sleep_sec=5, n_row=10):
+    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10):
         """
         * tradingviewの自作のチャートから15分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
            !!!15分足、ウォッチリスト表示の形式でチャートが保存されていることが前提
         * param
-            sleep_sec:int (default 5) sleep秒
+            cycle_minute:int (default 15) スクレイピングする間隔（分）※1時間の場合は60で設定
+                         ただし1, 5, 15, 30, 60のみ設定可能
+            sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
         * return 
             なし
@@ -857,11 +859,29 @@ class GmoTradUtil(object):
                 データ取得失敗 :下記例外を発生させる
                                 CloseMacdStochScrapGetError
         """
+
+        
         # 始値で1分以内に複数回ループすることを防ぐ
         open_rate_tmp = 0
 
+        # スクレイピングサイクルを設定
+        if cycle_minute == 1:
+            interval_minute_list = np.arange(0, 60, 1)
+        elif cycle_minute == 5:
+            interval_minute_list = np.arange(0, 60, 5)
+        elif cycle_minute == 15:
+            interval_minute_list = np.arange(0, 60, 15)
+        elif cycle_minute == 30:
+            interval_minute_list = np.arange(0, 60, 30)
+        elif cycle_minute == 60:
+            interval_minute_list = np.array([0])
+        else:
+            raise CloseMacdStochScrapGetError(f'invalid argument cycle_minute')
+            self.log.error('invalid argument cycle_minute')
+            sys.exit(1)
+
         while True:
-            self.log.info(f'scrap_macd_stoch_close15m() called')
+            self.log.info(f'scrap_macd_stoch_close() called')
 
             # ブラウザ立ち上げ
             try:
@@ -870,7 +890,8 @@ class GmoTradUtil(object):
                 driver = webdriver.Chrome(options=options)
                 driver.set_window_size(1200, 900)
                 driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'chart-gui-wrapper')))
+#                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'chart-gui-wrapper')))
+                time.sleep(10)
 
                 # マウスオーバー
                 chart = driver.find_element_by_class_name('chart-gui-wrapper')
@@ -885,10 +906,31 @@ class GmoTradUtil(object):
                 raise CloseMacdStochScrapGetError(f'browser set error :[{e}]')
 
             self.log.info(f'browser set up done')
-
-            # スクレイピング(15分間隔で実行)
-            if datetime.datetime.now().minute not in [0, 15, 30, 45]:
+            
+            #----------------------------------------------------------------------------------
+            # スクレイピングのサイクルとTradingviewの分足があっていなければ例外発生し停止させる
+            #----------------------------------------------------------------------------------
+            try:
+                title_attr = driver.find_element_by_class_name('titleWrapper-2KhwsEwE').text
+                title_minute = int(title_attr.split('\n')[1])
+                if cycle_minute != title_minute:
+                    raise CloseMacdStochScrapGetError(f'cycle_minute and tradingview minute not match')
+                    self.log.critical(f'cycle_minute and tradingview minute not match')
+                    sys.exit(1)
+            except Exception as e:
+                self.log.critical(f'{e}')
                 driver.quit()
+                raise CloseMacdStochScrapGetError(f'cycle_minute and tradingview minute not match')
+
+
+
+            # スクレイピング
+            while True:
+                now_time = datetime.datetime.now()
+                # tredingviewでcloseがチャートに反映が1秒くらいかかるため多めに5秒で設定している
+                if now_time.minute in interval_minute_list and now_time.second == 5:
+                    break
+#                driver.quit()
                 time.sleep(sleep_sec) 
                 self.log.info(f'not scraping time. browser closed')
                 continue
