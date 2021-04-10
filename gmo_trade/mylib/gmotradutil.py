@@ -1212,7 +1212,7 @@ class GmoTradUtil(object):
 
 
 
-    def check_cor_gmo_bitflyer(self, cor_thresh=0.30, symbol='BTC_JPY', n_mv=5, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=10, len_thresh=50):
+    def check_cor_gmo_bitflyer(self, cor_thresh=0.5, symbol='BTC_JPY', n_mv=5, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=10, len_thresh=50):
         """
         * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
           相関関係は1分足の5移動平均の相関係数で判断
