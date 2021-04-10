@@ -842,16 +842,19 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10):
+    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10, trv_time_lag=7):
         """
         * tradingviewの自作のチャートから15分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
-           !!!15分足、ウォッチリスト表示の形式でチャートが保存されていることが前提
+           !!!ウォッチリスト表示の形式でチャートが保存されていることが前提
         * param
             cycle_minute:int (default 15) スクレイピングする間隔（分）※1時間の場合は60で設定
                          ただし1, 5, 15, 30, 60のみ設定可能
             sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
+            trv_time_lag:int (default 10) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
+            　　　　　　　　　そのためチャートに反映されるまでスクレイピングしないよう停止(スリープ)させ
+                              正しいインジケーターを取得させるようにする
         * return 
             なし
                 データ取得成功 :self.ind_dfにデータ時系列で降順で格納される
@@ -880,7 +883,7 @@ class GmoTradUtil(object):
             sys.exit(1)
 
         while True:
-            self.log.info(f'scrap_macd_stoch_close() called')
+            self.log.info(f'scrap_macd_stoch_close() called cycle_minute:[{cycle_minute}]')
 
             # ブラウザ立ち上げ
             try:
@@ -889,7 +892,7 @@ class GmoTradUtil(object):
                 driver = webdriver.Chrome(options=options)
                 driver.set_window_size(1200, 900)
                 driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
-#                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'chart-gui-wrapper')))
+                # jsが反映されるまで待機
                 time.sleep(10)
 
                 # マウスオーバー
@@ -926,12 +929,11 @@ class GmoTradUtil(object):
             # スクレイピング
             while True:
                 now_time = datetime.datetime.now()
-                # tredingviewでcloseがチャートに反映が1秒くらいかかるため多めに5秒で設定している
-                if now_time.minute in interval_minute_list and now_time.second == 5:
+                # tredingviewでcloseがチャートに反映にタイムラグが生じることを考慮し秒で調整する
+                if now_time.minute in interval_minute_list and now_time.second == trv_time_lag:
                     break
-#                driver.quit()
                 time.sleep(sleep_sec) 
-                self.log.info(f'not scraping time. browser closed')
+                self.log.info(f'not scraping time')
                 continue
             try:
                 # CSSセレクタで指定のクラスでelementを取得
@@ -951,6 +953,7 @@ class GmoTradUtil(object):
 
                 # 同じ値だったらcontinue
                 if open_rate_tmp == open_rate:
+                    self.log.info('bitflyer open rate same value :[{open_rate}]')
                     driver.quit()
                     time.sleep(sleep_sec) 
                     continue
@@ -1032,7 +1035,7 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch(self, sleep_sec=1, n_row=65):
+    def scrap_macd_stoch_stream(self, sleep_sec=1, n_row=65):
         """
         *tradingviewの自作のチャートからmacd,ストキャスティクスの値を取得する
          →https://jp.tradingview.com/chart/wTJWkxIA/
