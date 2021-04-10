@@ -1023,9 +1023,9 @@ class GmoTradUtil(object):
 
 
             # データフレームが一定行数超えたら古い順から削除
-            if len(self.bitf_rate_df) > n_row: self.bitf_rate_df.drop(index=self.bitf_rate_df.index.max())
-            if len(self.macd_df)      > n_row: self.macd_df.drop(index=self.macd_df.index.max())
-            if len(self.stoch_df)     > n_row: self.stoch_df.drop(index=self.stoch_df.index.max())
+            if len(self.bitf_rate_df) > n_row: self.bitf_rate_df.drop(index=self.bitf_rate_df.index.min(), inplace=True)
+            if len(self.macd_df)      > n_row: self.macd_df.drop(index=self.macd_df.index.min(), inplace=True)
+            if len(self.stoch_df)     > n_row: self.stoch_df.drop(index=self.stoch_df.index.min(), inplace=True)
 
 # test
             print(self.bitf_rate_df)
@@ -1278,8 +1278,8 @@ class GmoTradUtil(object):
                                 新規ポジション作成を停止します。')
                         is_line = True
                     # dataframe、リトライカウント用変数を初期化
-                    gmo_rate_df     = pd.DataFrame(columns=['rate'])
-                    gmo_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
+#                    gmo_rate_df     = pd.DataFrame(columns=['rate'])
+#                    gmo_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
                     gmo_retry_cnt  = 0
                     continue
 
@@ -1315,8 +1315,8 @@ class GmoTradUtil(object):
                                 新規ポジション作成を停止します。')
                         is_line = True
                     # dataframe、リトライカウント初期化
-                    bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
-                    bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
+#                    bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
+#                    bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
                     bitf_retry_cnt = 0
                     continue
 
@@ -1396,10 +1396,10 @@ class GmoTradUtil(object):
         """
         * ストキャスティクスの値によりポジション判定を行う
           スクレイピングとは別プロセスなのでスクレイピングで出力したファイルを読み込み判定する
-          ストキャスティクスはリアルタイムでなく1分足closeを使用する
-          閾値をクリアした行を基準値としてポジション判定を行う。
-          基準値が確定すると基準値確定フラグがTrue、未確定の場合はFalseとする
-          ファイル出力はなくpandas上で保持。ログにはポジション情報が出力される
+          * 基本方針
+            閾値をクリアした値でGX,DXでポジション判定を行う。
+            閾値をクリアしななかった値でGX,DXが形成された場合はミニポジションとして逆指値を動かす判定とする
+            ポジション情報はpandasに保持し,ファイル出力する。ログにもポジション情報が出力される
         * param
             row_thresh:int (default 20) ストキャスティクスのロング目線でのライン閾値
             hight_thresh:int (default 80)ストキャスティクスのショート目線での閾値
