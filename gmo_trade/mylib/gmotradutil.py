@@ -1399,7 +1399,12 @@ class GmoTradUtil(object):
           * 基本方針
             閾値をクリアした値でGX,DXでポジション判定を行う。
             閾値をクリアしななかった値でGX,DXが形成された場合はミニポジションとして逆指値を動かす判定とする
-            ポジション情報はpandasに保持し,ファイル出力する。ログにもポジション情報が出力される
+            ポジション情報はpandasに保持しファイル出力しない。ログにはポジション情報が出力される
+            *格納するポジションの文字列の例
+             ロング:'LONG'
+             ショート:'SHORT'
+             ミニロング:'MINILONG'
+             ミニショート'MINISHORT'
         * param
             row_thresh:int (default 20) ストキャスティクスのロング目線でのライン閾値
             hight_thresh:int (default 80)ストキャスティクスのショート目線での閾値
@@ -1414,8 +1419,8 @@ class GmoTradUtil(object):
         """
 
 
-        # ポジション確定フラグ
-        is_position = False
+        # 同時刻に複数回ループするのを防ぐためpkで判定する
+        tmp_pK = 0.0
 
         while True:
             self.log.info(f'positioner_stoch() called')        
@@ -1441,89 +1446,47 @@ class GmoTradUtil(object):
             last_stoch_df = stoch_df.tail(n=2).reset_index(level=0, drop=True)
             self.log.info(f'last_stoch_df : [{last_stoch_df.to_json()}]')
 
-            # 閾値をクリアしていなければ判定しない
-            if row_thresh < last_stoch_df.at[0, 'pK'] < hight_thresh:
-                self.log.info(f'stoch close data not satisfy :[{last_stoch_df.at[0, "pK"]}]')
+            # 同じ値であればスリープしてスキップ
+            if tmp_pK == last_stoch_df['pK'][0]:
                 await asyncio.sleep(sleep_sec)
                 continue
+            tmp_pK = last_stoch_df['pK'][0]
 
             # ポジション判定処理
             # LONG目線
             if last_stoch_df['pK'][0] <= row_thresh:
                 if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
-
-                        if is_position == False:
-                            # 時系列では降順として作成
-                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                            is_position = True
-                            self.log.info(f'position set LONG')
-                    else:
-                        is_position = False
-                else:
-                    is_position = False
+                        # GX 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        self.log.info(f'position set LONG')
            
             # SHORT目線
             elif last_stoch_df['pK'][0] >= hight_thresh:
                 if last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
+                        # DX 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        self.log.info(f'position set SHORT')
 
-                        if is_position == False:
-                            # 時系列では降順として作成
-                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                            is_position = True
-                            self.log.info(f'position set SHORT')
-                    else:
-                        is_position = False
-                else:
-                    is_position = False
+            # MINILONG or MINISHORT
             else:
-                is_position = False
-#            # LONG目線
-#            if std_stoch_df.at[0, 'pK'] <= row_thresh:
-#
-#                # GX状態
-#                if last_stoch_df.at[0, 'pK'] > last_stoch_df.at[0, 'pD']:
-#
-#                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
-#                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
-#
-#                        if is_position == False:
-#                            # 時系列では降順として作成
-#                            tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-#                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-#                            is_position = True
-#                            self.log.info(f'position set LONG')
-#                    else:
-#                        is_position = False
-#                else:
-#                    is_position = False
-#
-#
-#            # SHORT目線
-#            elif std_stoch_df.at[0, 'pK'] >= hight_thresh:
-#
-#                # DX状態
-#                if last_stoch_df.at[0, 'pK'] < last_stoch_df.at[0, 'pD']:
-#
-#                    # 基準値の時刻からdlt_sec秒経過していればポジション確定
-#                    if (last_stoch_df['get_time'][0] - std_stoch_df['get_time'][0]).seconds >= dlt_sec:
-#
-#                        if is_position == False:
-#                            # 時系列では降順として作成
-#                            tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-#                            self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-#                            is_position = True
-#                            self.log.info(f'position set SHORT')
-#
-#                    else:
-#                        is_position = False
-#                else:
-#                    is_position = False
-#
-#
+                if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
+                    if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
+                        # MINILONG 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'MINILONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        self.log.info(f'position set MINILONG')
+
+                if last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
+                    if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
+                        # MINISHORT 時系列では降順として作成
+                        tmp_df = pd.DataFrame({'position':'MINISHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
+                        self.log.info(f'position set MINISHORT')
+
             await asyncio.sleep(sleep_sec)
 
             # ポジション格納データフレームの行数が一定数超えたら古いものから削除
