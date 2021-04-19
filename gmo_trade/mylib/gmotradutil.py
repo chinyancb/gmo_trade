@@ -1117,11 +1117,6 @@ class GmoTradUtil(object):
             self.stoch_stream_df = pd.concat([stoch_stream_df_tmp, self.stoch_stream_df], ignore_index=True)   
             self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
 
-            # 1分足macd,stochのcloseデータを作成
-            if macd_stream_df_tmp['get_time'].item().second == 59:
-                self.mk_close_macd(df=macd_stream_df_tmp)
-            if stoch_stream_df_tmp['get_time'].item().second == 59:
-                self.mk_close_stoch(df=stoch_stream_df_tmp)
 
             del(macd_stream_df_tmp)
             del(stoch_stream_df_tmp)
@@ -1143,72 +1138,6 @@ class GmoTradUtil(object):
             time.sleep(sleep_sec)
             self.log.info(f'scraping 1cycle done')
 
-
-
-    def mk_close_macd(self, df, n_row=30):
-        """
-        * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
-          作成したデータをCSVとして出力する
-        * param
-            df   :dataframe closeデータ作成のためのデータフレーム
-            n_row:int (default 30) 保持する行数
-        * return
-            True :bool closeデータ作成成功
-            False:bool closeデータ作成失敗             
-        """
-        self.log.info(f'mk_close_macd() called') 
-
-        # メンバに登録(時系列としては昇順)
-        self.macd_df = pd.concat([self.macd_df, df], ignore_index=True)
-        self.log.info(f'close macd data make done')
-        # ファイル出力
-        try:
-            self._write_csv_dataframe(df=self.macd_df, path=MACD_FILE_PATH + self.macd_filename)
-        except Exception as e:
-            self.log.critical(f'to csv failed : [{e}]')
-            return False
-
-#test
-        print('----- macd -----')
-        print(self.macd_df)
-        if len(self.macd_df)  == n_row:self.macd_df.drop(index=0, inplace=True)
-        del(df)
-        self.log.info(f'mk_close_macd() done')
-        return True
-
-
-
-    def mk_close_stoch(self, df, n_row=30):
-        """
-        * scrap_macd_stoch()で取得したmacdのデータを1分足のクローズとして作成する
-          ※スクレイピング処理に時間がかかり欠損が生じるため59秒のデータを取得できい場合は58秒時の値を採用する
-        * param
-            df   :dataframe closeデータ作成のためのデータフレーム
-            n_row:int (default 30) 保持する行数
-        * return
-            True :bool closeデータ作成成功
-            False:bool closeデータ作成失敗
-        """
-        self.log.info(f'mk_close_stoch() called') 
-
-
-        # メンバに登録(時系列としては昇順)
-        self.stoch_df = pd.concat([self.stoch_df, df], ignore_index=True)
-        self.log.info(f'close stoch data make done')
-
-        # ファイル出力
-        try:
-            self._write_csv_dataframe(df=self.stoch_df, path=STOCH_FILE_PATH + self.stoch_filename)
-        except Exception as e:
-            self.log.critical(f'to csv failed : [{e}]')
-            return False
-#test
-        print('----- stoch -----')
-        print(self.stoch_df)
-        if len(self.stoch_df)  == n_row:self.stoch_df.drop(index=0, inplace=True)
-        del(df)
-        self.log.info(f'mk_close_stoch() done')
-        return True
 
 
 
@@ -1424,9 +1353,6 @@ class GmoTradUtil(object):
 
         while True:
             self.log.info(f'positioner_stoch() called')        
-#test
-            print('----- stoch -----')
-            print(self.pos_stoch_jdg_df)
 
             # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
             try:
@@ -1496,7 +1422,7 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner_macd(self, hist_zero=100, kms_thresh=-376000, sleep_sec=1, n_row=5):
+    async def positioner_macd(self, hist_zero=100, kmsx_thresh=5, sleep_sec=1, n_row=5):
         """
         * macdの情報によりポジション判定を行う
         * param
@@ -1510,10 +1436,9 @@ class GmoTradUtil(object):
               self.pos_macd_jdg_df
         """
         self.log.info(f'positioner_macd() called')
-        
-        # ポジション確定フラグ
-        is_position = False
-       
+
+        # 同時刻に複数回ループするのを防ぐためにmacdを使用する
+        tmp_macd = 0
 
         while True:
 
@@ -1526,123 +1451,152 @@ class GmoTradUtil(object):
                 continue
             self.log.info(f'stoch close data to dataframe done')        
 
-            # 最新のmacd情報を取得（3行）
-            tmp_macd_df = macd_df.tail(n=3).reset_index(level=0, drop=True)
+            # 最新のmacd情報を取得（5行）
+            tmp_macd_df = macd_df.tail(n=5).reset_index(level=0, drop=True)
             self.log.info(f'macd data : [{tmp_macd_df.to_json()}]')
 
             if len(tmp_macd_df) < 3:
                 await asyncio.sleep(sleep_sec)
                 continue
 
-            macd0 = tmp_macd_df['macd'][0]           
-            macd1 = tmp_macd_df['macd'][1]
-            macd2 = tmp_macd_df['macd'][2]
-
-            signal0 = tmp_macd_df['signal'][0]            
-            signal1 = tmp_macd_df['signal'][1]
-            signal2 = tmp_macd_df['signal'][2]
-
-            hist0 = tmp_macd_df['hist'][0]
-            hist1 = tmp_macd_df['hist'][1]
-            hist2 = tmp_macd_df['hist'][2]
-
-            # MACDとシグナルの傾き
-            kmd1 = (macd1 - macd0) / 1
-            kmd2 = (macd2 - macd1) / 1
-
-            ksg1 = (signal1 - signal0) / 1
-            ksg2 = (signal2 - signal1) / 1
-
-            # MACDとシグナルの傾きの積（オリジナル指標）
-            kms1 = kmd1 * ksg1
-            kms2 = kmd2 * ksg2
-            self.log.info(f'kms1 : [{kms1}] kms2 : [{kms2}]')
-
-            
-            # ポジション判定
-
-            #------------------
-            # GX (LONG)
-            #------------------
-            if macd0 < signal0 and macd2 > signal2:
-
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set LONG : pattern [GX]')
-            
-            #------------------
-            # DX (SHORT)
-            #------------------
-            elif macd0 > signal0 and macd2 < signal2:
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set SHORT : pattern [DX]')
-
-            #-----------------------------
-            # シグナル上で上に反発（LONG）
-            #-----------------------------
-            elif ((macd1 < macd0) and (macd1 < macd2)) and ((hist0 > hist_zero) and (abs(hist1) < hist_zero) and (hist2 > hist_zero)):
-
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set LONG : pattern [rebound LONG]')
-
-            #-----------------------------
-            # シグナル上で下に反発（SHORT）
-            #-----------------------------
-            elif ((macd1 > macd0) and (macd1 > macd2)) and ((hist0 < -hist_zero) and (abs(hist1) < hist_zero) and (hist2 < -hist_zero)):
-
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set SHORT : pattern [rebound SHORT]')
-            
-            #------------------------------
-            # GX間近(オリジナル指標を使用)
-            #------------------------------
-            elif ((hist0 < 0) and (hist1 < 0) and (hist2 < 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set LONG : pattern [nearness GX]')
-
-            #------------------------------
-            # DX間近(オリジナル指標を使用)
-            #------------------------------
-            elif ((hist0 > 0) and (hist1 > 0) and (hist2 > 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
-                # 時系列では降順として作成
-                if is_position == False:
-                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
-                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
-                    is_position = True
-                    self.log.info(f'position set SHORT : pattern [nearness DX]')
-
-            else:
-                self.log.info('no position stat')
-                is_position = False
+            # macdが同じ値ならスリープしてスキップ
+            if tmp_macd == tmp_macd_df['macd'][0]:
+                await asyncio.sleep(sleep_sec)
+                continue
+            # macd更新
+            tmp_macd = tmp_macd_df['macd'][0]
 
 
-            # ポジションデータが一定数超えたら古いものから削除
-            if len(self.pos_macd_jdg_df.index) > n_row:
-                self.pos_macd_jdg_df.drop(index=self.pos_macd_jdg_df.index.max(), inplace=True)
+#            macd0 = tmp_macd_df['macd'][0]           
+#            macd1 = tmp_macd_df['macd'][1]
+#            macd2 = tmp_macd_df['macd'][2]
+#
+#            signal0 = tmp_macd_df['signal'][0]            
+#            signal1 = tmp_macd_df['signal'][1]
+#            signal2 = tmp_macd_df['signal'][2]
+#
+#            hist0 = tmp_macd_df['hist'][0]
+#            hist1 = tmp_macd_df['hist'][1]
+#            hist2 = tmp_macd_df['hist'][2]
+#
+#            # MACDとシグナルの傾き
+#            kmd1 = (macd1 - macd0) / 1
+#            kmd2 = (macd2 - macd1) / 1
+#
+#            ksg1 = (signal1 - signal0) / 1
+#            ksg2 = (signal2 - signal1) / 1
+#
+#            # MACDの傾きがシグナルの傾きの何倍か計算する（オリジナル指標）
+#            kmsx1 = kmd1 / ksg1
+#            kmsx2 = kmd2 / ksg2
+#            self.log.info(f'kmd1 : [{kmd1}] kmd2 : [{kmd2}]')
+## test
+#            self.log.info('===== macd =====')
+#            self.log.info(f'kmd1 : [{kmd1}] kmd2 : [{kmd2}]')
+#            self.log.info(f'ksg1 : [{ksg1}] ksg2 : [{ksg2}]')
+#            self.log.info(f'kmsx1 :[{kmsx1}] kmsx2 :[{kmsx2}]')
+#
+#            # 増減率
+#            kmdr1 = (macd1 - macd0) / macd0
+#            kmdr2 = (macd2 - macd1) / macd1
+#            ksgr1 = (signal1 - signal0) / signal0
+#            ksgr2 = (signal2 - signal1) / signal1
+#            # 積
+#            kmsrx1 = kmdr1 * ksgr1
+#            kmsrx2 = kmdr2 * ksgr2
+#            self.log.info(f'kmdr1 : [{kmdr1}] kmdr2 : [{kmdr2}]')
+#            self.log.info(f'ksgr1 : [{ksgr1}] ksgr2 : [{ksgr2}]')
+#            self.log.info(f'kmsrx1 : [{kmsrx1}] kmsrx2 : [{kmsrx2}]')
+
+
 
             await asyncio.sleep(sleep_sec)
-# test
-            print('----- macd -----')
-            print(self.pos_macd_jdg_df)
+            continue
+#            
+#            # ポジション判定
+#
+#            #------------------
+#            # GX (LONG)
+#            #------------------
+#            if macd0 < signal0 and macd2 > signal2:
+#
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set LONG : pattern [GX]')
+#            
+#            #------------------
+#            # DX (SHORT)
+#            #------------------
+#            elif macd0 > signal0 and macd2 < signal2:
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set SHORT : pattern [DX]')
+#
+#            #-----------------------------
+#            # シグナル上で上に反発（LONG）
+#            #-----------------------------
+#            elif ((macd1 < macd0) and (macd1 < macd2)) and ((hist0 > hist_zero) and (abs(hist1) < hist_zero) and (hist2 > hist_zero)):
+#
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set LONG : pattern [rebound LONG]')
+#
+#            #-----------------------------
+#            # シグナル上で下に反発（SHORT）
+#            #-----------------------------
+#            elif ((macd1 > macd0) and (macd1 > macd2)) and ((hist0 < -hist_zero) and (abs(hist1) < hist_zero) and (hist2 < -hist_zero)):
+#
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set SHORT : pattern [rebound SHORT]')
+#            
+#            #------------------------------
+#            # GX間近(オリジナル指標を使用)
+#            #------------------------------
+#            elif ((hist0 < 0) and (hist1 < 0) and (hist2 < 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set LONG : pattern [nearness GX]')
+#
+#            #------------------------------
+#            # DX間近(オリジナル指標を使用)
+#            #------------------------------
+#            elif ((hist0 > 0) and (hist1 > 0) and (hist2 > 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
+#                # 時系列では降順として作成
+#                if is_position == False:
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
+#                    is_position = True
+#                    self.log.info(f'position set SHORT : pattern [nearness DX]')
+#
+#            else:
+#                self.log.info('no position stat')
+#                is_position = False
+#
+#
+#            # ポジションデータが一定数超えたら古いものから削除
+#            if len(self.pos_macd_jdg_df.index) > n_row:
+#                self.pos_macd_jdg_df.drop(index=self.pos_macd_jdg_df.index.max(), inplace=True)
+#
+#            await asyncio.sleep(sleep_sec)
+## test
+#            print('----- macd -----')
+#            print(self.pos_macd_jdg_df)
 
 
 
