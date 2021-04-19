@@ -1035,13 +1035,13 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_stream(self, sleep_sec=1, n_row=65):
+    def scrap_macd_stoch_stream(self, sleep_sec=3, n_row=20):
         """
         *tradingviewの自作のチャートからmacd,ストキャスティクスの値を取得する
          →https://jp.tradingview.com/chart/wTJWkxIA/
         * param
-            sleep_sec:int (default 1) スリープ時間(秒)
-            n_row:int (default 65) 作成したdataframeを保持する行数.超えると削除
+            sleep_sec:int (default 3) スリープ時間(秒)
+            n_row:int (default 20) 作成したdataframeを保持する行数.超えると削除
         * return
             無し
             取得成功
@@ -1063,7 +1063,7 @@ class GmoTradUtil(object):
         except Exception as e:
             driver.quit()
             self.log.critical(f'cant open headless browser : [{e}]')
-            raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+            raise CloseMacdStochStreamScrapGetError(f'cant open headless browser : [{e}]')
 
         self.log.info(f'headless browser opend')
 
@@ -1099,12 +1099,12 @@ class GmoTradUtil(object):
                 #------------------------------------------------------------------------
                 if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
                     self.log.critical(f'sotch value invalid : [{stoch_array}]')
-                    raise CloseMacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
+                    raise CloseMacdStochStreamScrapGetError(f'sotch value invalid : [{stoch_array}]')
             except Exception as e:
                 self.log.critical(f'cant get macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
-                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+                raise CloseMacdStochStreamScrapGetError(f'cant open headless browser : [{e}]')
             except KeyboardInterrupt:
                 driver.quit()
                 self.init_memb()
@@ -1133,7 +1133,7 @@ class GmoTradUtil(object):
                 self.log.critical(f'cant write macd stoch data : [{e}]')
                 driver.quit()
                 self.init_memb()
-                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+                raise CloseMacdStochStreamScrapGetError(f'cant open headless browser : [{e}]')
 
             time.sleep(sleep_sec)
             self.log.info(f'scraping 1cycle done')
@@ -1141,7 +1141,7 @@ class GmoTradUtil(object):
 
 
 
-    def check_cor_gmo_bitflyer(self, cor_thresh=0.5, symbol='BTC_JPY', n_mv=5, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=10, len_thresh=50):
+    async def check_cor_gmo_bitflyer(self, cor_thresh=0.65, symbol='BTC_JPY', n_mv=5, sleep_sec=60, retry_sleep_sec=10, retry_thresh=3, sma_len_thresh=10, len_thresh=50, jdg_len_thresh=3):
         """
         * GMOコインとビットフライヤーでの最新レートで同じトレンド(相関関係)となっているか確認する
           相関関係は1分足の5移動平均の相関係数で判断
@@ -1156,6 +1156,7 @@ class GmoTradUtil(object):
             retry_thresh:int (default 3) リトライ回数の閾値。超えるとSTOP_NEW_TRADEファイルを作成
             sma_len_thresh:int (default 5) 単純移動平均を保持する個数。超えると古いものから削除する
             len_thresh:int (default 60) レートを保持する個数。超えると古いものから削除する
+            jdg_len_thresh:int (default 3) smaの長さが指定未満だと相関係数を計算しない
         * return
             無し 
                 閾値以上:pass
@@ -1181,7 +1182,7 @@ class GmoTradUtil(object):
         bitf_retry_cnt = 0
 
         # LINE通知用フラグ
-        is_line = False
+        is_line_ntfy = False
 
         while True:
 
@@ -1192,7 +1193,7 @@ class GmoTradUtil(object):
                     break
 
                 # リトライ
-                time.sleep(retry_sleep_sec) 
+                await asycio.sleep(retry_sleep_sec) 
                 gmo_retry_cnt += 1
                 self.log.info(f'_get_rate() retry. retry count : [{gmo_retry_cnt}]')
                 continue
@@ -1200,15 +1201,12 @@ class GmoTradUtil(object):
                 # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                 if gmo_retry_cnt > retry_thresh:
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)            
-                    if is_line == False:
+                    if is_line_ntfy == False:
                         self.line.send_line_notify(f'\
                                 [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
-                        is_line = True
-                    # dataframe、リトライカウント用変数を初期化
-#                    gmo_rate_df     = pd.DataFrame(columns=['rate'])
-#                    gmo_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
+                        is_line_ntfy = True
                     gmo_retry_cnt  = 0
                     continue
 
@@ -1230,22 +1228,19 @@ class GmoTradUtil(object):
                     break
 
                 # リトライ
-                time.sleep(retry_sleep_sec) 
+                await asyncio.sleep(retry_sleep_sec) 
                 bitf_retry_cnt += 1
                 continue
 
                 # リトライ回数の閾値を超えたらSTOP_NEW_TRADE ファイルを作成し新規ポジションを停止させる
                 if bitf_retry_cnt > retry_thresh:
                     self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) 
-                    if is_line == False:
+                    if is_line_ntfy == False:
                         self.line.send_line_notify(f'\
                                 [CRITICALL]\
                                 ビットフライヤーの最新レートを取得できませんでした。\
                                 新規ポジション作成を停止します。')
-                        is_line = True
-                    # dataframe、リトライカウント初期化
-#                    bitflyer_rate_df     = pd.DataFrame(columns=['rate'])
-#                    bitflyer_rate_sma_df = pd.DataFrame(columns=['rate_sma'])
+                        is_line_ntfy = True
                     bitf_retry_cnt = 0
                     continue
 
@@ -1262,7 +1257,7 @@ class GmoTradUtil(object):
 
             # レートの個数が2つ以上無い計算できないためconitnue
             if (len(gmo_rate_sma_df.index) < 2) and (len(bitflyer_rate_sma_df.index) < 2):
-                time.sleep(sleep_sec)
+                await asyncio.sleep(sleep_sec)
                 continue
 
             
@@ -1275,6 +1270,9 @@ class GmoTradUtil(object):
                 self.log.info(f'gmo and biftlyer rate array length no match. init both array')
                 continue
 
+            # リストの長さがjdg_len_threshで指定された長さ未満だと相関係数を判定しない
+            if len (gmo_rate_sma_df) < jdg_len_thresh:
+                continue
 
             # 相関係数を計算
             cor = np.corrcoef(gmo_rate_sma_df['rate_sma'].values, bitflyer_rate_sma_df['rate_sma'].values)[0,1]
@@ -1283,13 +1281,13 @@ class GmoTradUtil(object):
             if cor >= cor_thresh:
                 # ポジション停止ファイルがあった場合は削除する
                 if self.rm_file(path=SYSCONTROL, filename=STOP_NEW_TRADE) == True:
-                    if is_line == False:
+                    if is_line_ntfy == False:
                         self.line.send_line_notify(f'\
                                 [INFO]\
                                 GMOコインとビットフライヤーでトレンドの相関が確認できました。\
                                 新規ポジション作成可能状態にします。\
                                 相関係数:{cor}')
-                        is_line = True
+                        is_line_ntfy = True
 
                 self.log.info(f'gmo bitfilyer rate cor ok : [{cor}]')
 
@@ -1298,13 +1296,13 @@ class GmoTradUtil(object):
                 self.log.critical(f'gmo bitfilyer rate cor NG : [{cor}]')
                 self.make_file(path=SYSCONTROL, filename=STOP_NEW_TRADE)
                 self.log.critical('stop new trad. make file {STOP_NEW_TRADE}')
-                if is_line == False:
+                if is_line_ntfy == False:
                     self.line.send_line_notify(f'\
                             [CRITICALL]\
                             GMOコインとビットフライヤーでトレンドの相関が崩れました。\
                             新規ポジションを停止状態にします。\
                             相関係数:{cor}')
-                    is_line = True
+                    is_line_ntfy = True
 
             # 配列の長さが閾値を超えると古いものを削除(メモリ削減のため)
             if len(gmo_rate_df) > len_thresh: gmo_rate_df.drop(index=0, inplace=True)
@@ -1316,7 +1314,7 @@ class GmoTradUtil(object):
             gmo_retry_cnt  = 0
             bitf_retry_cnt = 0
 
-            time.sleep(sleep_sec)
+            await asyncio.sleep(sleep_sec)
             continue
 
 
@@ -1624,7 +1622,7 @@ class GmoTradUtil(object):
             PosJudgementError
         """
         # ライン通知用（テスト)
-        is_line = False
+        is_line_ntfy = False
 
         # ポジション確定フラグ
         is_position = False
@@ -1649,7 +1647,7 @@ class GmoTradUtil(object):
             # MACDとストキャスティクスのポジションでない場合はcontinue
             if pos_stoch['position'][0] != pos_macd['position'][0]:
                 self.log.info(f"macd stoch not same position. macd :[{pos_stoch['position'][0]}] stoch :[{pos_macd['position'][0]}]")
-                is_line = False
+                is_line_ntfy = False
                 is_position = False 
                 continue
 
@@ -1659,24 +1657,24 @@ class GmoTradUtil(object):
             if dlt_jdg_timestamp.seconds > 0:
                 if dlt_jdg_timestamp.seconds > dlt_sec:
                     self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
-                    is_line = False
+                    is_line_ntfy = False
                     is_position = False
                     continue
             else:
                 if dlt_jdg_timestamp.seconds < dlt_sec:
                     self.log.info(f'time lag not satisfy. dlt_jdg_timestamp : [{dlt_jdg_timestamp}]')
-                    is_line = False
+                    is_line_ntfy = False
                     is_position = False
                     continue
 
             # ポジションデータを指定されたディレクトリ配下に空ファイルとして作成
             filename = pos_stoch['position'][0] + '_' + datetime.datetime.now().isoformat()
 #test
-            if is_line == False:
+            if is_line_ntfy == False:
                 self.line.send_line_notify(f'[INFO]\
                         ポジション確定しました。↓\
                         position : [{filename}]')
-                is_line = True
+                is_line_ntfy = True
 #test
             if is_position == False:
                 if self.make_file(path=path, filename=filename) == False:
