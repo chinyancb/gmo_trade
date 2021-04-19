@@ -50,10 +50,10 @@ WEBSOCKET_ENDPOINT = 'wss://api.coin.z.com/ws/public/v1'
 
 # データ出力先パス
 CLOSE_RATE_FILE_PATH     = app_home + '/var/share/close/'        # closeレート情報
-MACD_FILE_PATH           = app_home + '/var/share/macd/'         # MACD1分CLOSE値(ニアリーイコール)
-MACD_STREAM_FILE_PATH    = app_home + '/var/share/macd_stream/'  # MACD1秒
-STOCH_FILE_PATH          = app_home + '/var/share/stoch/'        # ストキャスティクス1分CLOSE(ニアリーイコール)
-STOCH_STREAM_FILE_PATH   = app_home + '/var/share/stoch_stream/' # ストキャスティクス1秒値
+MACD_FILE_PATH           = app_home + '/var/share/macd/'         # MACDCLOSE
+MACD_STREAM_FILE_PATH    = app_home + '/var/share/macd_stream/'  # MACDリアルタイム(ニアリーイコール)
+STOCH_FILE_PATH          = app_home + '/var/share/stoch/'        # ストキャスティクスCLOSE
+STOCH_STREAM_FILE_PATH   = app_home + '/var/share/stoch_stream/' # ストキャスティクスリアルタイム(ニアリーイコー)
 POSITION_FILE_PATH       = app_home + '/var/share/pos/'          # ポジション判定結果
 POSITION_MACD_FILE_PATH  = app_home + '/var/share/pos/macd/'     # MACDによるポジション判定結果
 POSITION_STOCH_FILE_PATH = app_home + '/var/share/pos/stoch/'    # ストキャスティクスよるポジション判定結果
@@ -853,13 +853,14 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10, trv_time_lag=5):
+    def scrap_macd_stoch_close(self, cycle_minute=1, sleep_sec=0.5, n_row=10, trv_time_lag=5):
         """
-        * tradingviewの自作のチャートから15分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
+        * tradingviewの自作のチャートから1分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
+           !!!必ずトレーディングビューの分足とcycle_minuteの時間を合わせること
            !!!ウォッチリスト表示の形式でチャートが保存されていることが前提
         * param
-            cycle_minute:int (default 15) スクレイピングする間隔（分）※1時間の場合は60で設定
+            cycle_minute:int (default 1) スクレイピングする間隔（分）※1時間の場合は60で設定
                          ただし1, 5, 15, 30, 60のみ設定可能
             sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
@@ -869,13 +870,9 @@ class GmoTradUtil(object):
         * return 
             なし
                 データ取得成功 :self.ind_dfにデータ時系列で降順で格納される
-                データ取得失敗 :下記例外を発生させる
+                データ取得失敗 :下記例外を発生させ,終了する
                                 CloseMacdStochScrapGetError
         """
-
-        
-        # 始値で1分以内に複数回ループすることを防ぐ
-        open_rate_tmp = 0
 
         # スクレイピングサイクルを設定
         if cycle_minute == 1:
@@ -936,110 +933,145 @@ class GmoTradUtil(object):
                 self.log.critical(f'{e}')
                 driver.quit()
                 raise CloseMacdStochScrapGetError(f'cycle_minute and tradingview minute not match')
+                sys.exit(1)
 
 
 
             # スクレイピング
+            # 取得した時間と始値もとにで同時刻以内に複数回ループすることを防ぐ
+            get_time_tmp  = datetime.datetime.now()
             while True:
-                now_time = datetime.datetime.now()
-                # tredingviewでcloseがチャートに反映にタイムラグが生じることを考慮し秒で調整する
-                if now_time.minute in interval_minute_list and now_time.second == trv_time_lag:
-                    break
-                time.sleep(sleep_sec) 
-                self.log.info(f'not scraping time')
-                continue
-            try:
-                # CSSセレクタで指定のクラスでelementを取得
-                ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
-                get_time = datetime.datetime.now()
-                self.log.info(f'got elements :[{ind_array}]')
-
-                # レートの値を取得
-                rate_str = ind_array[0].text
-                self.log.debug(f'rate_str : [{rate_str}]')
-                open_rate  = int(rate_str.split('始値')[1].split('高値')[0])
-                high_rate  = int(rate_str.split('高値')[1].split('安値')[0])
-                low_rate   = int(rate_str.split('安値')[1].split('終値')[0])
-                close_rate_str = rate_str.split('終値')[1].split('終値')[0]
-                close_rate = int(re.split('[+|−]', close_rate_str)[0])
-                rate_array = [open_rate, high_rate, low_rate, close_rate] 
-
-                # 同じ値だったらcontinue
-                if open_rate_tmp == open_rate:
-                    self.log.info('bitflyer open rate same value :[{open_rate}]')
+                while True:
+                    now_time = datetime.datetime.now()
+                    # tredingviewでcloseがチャートに反映にタイムラグが生じることを考慮し秒で調整する
+                    if now_time.minute in interval_minute_list and now_time.second == trv_time_lag:
+                        break
                     time.sleep(sleep_sec) 
+                    self.log.info(f'not scraping time')
                     continue
-                open_rate_tmp = open_rate
+                try:
+                    # CSSセレクタで指定のクラスでelementを取得
+                    ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
+                    get_time = datetime.datetime.now()
+                    self.log.info(f'got elements :[{ind_array}]')
 
-                # MACDとストキャスティクスをリストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
-                macd_array  = ind_array[1].text.replace('−', '-').split('\n')
-                stoch_array = ind_array[2].text.split('\n')
-                self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
+                    # 同時刻内に複数回ループすることを防ぐため取得した時間が5秒未満であればcontinue
+                    if (get_time - get_time_tmp) < datetime.timedelta(seconds=5):
+                        self.log.info(f'get time invalid')
+                        continue
 
-                # 文字列を数値へ変換
-                macd_array  = [int(data) for data in macd_array]
-                stoch_array = [float(data) for data in stoch_array]
-                self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
+                    # サイクル通りにデータが取得できていない場合は例外を発生させる(トレーディングビューにラグがあるため）
+                    if cycle_minute == 1:
+                        if get_time.minute not in np.arange(0, 60, 1):
+                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
+                            self.log.error(f'not get collect cycle minute')
+                            sys.exit(1)
+                    elif cycle_minute == 5:
+                        if get_time.minute not in np.arange(0, 60, 5):
+                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
+                            self.log.error(f'not get collect cycle minute')
+                            sys.exit(1)
+                    elif cycle_minute == 15:
+                        if get_time.minute not in np.arange(0, 60, 15):
+                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
+                            self.log.error(f'not get collect cycle minute')
+                            sys.exit(1)
+                    elif cycle_minute == 30:
+                        if get_time.minute not in np.arange(0, 60, 30):
+                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
+                            self.log.error(f'not get collect cycle minute')
+                            sys.exit(1)
+                    elif cycle_minute == 60:
+                        if get_time.minute not in  np.array([0]):
+                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
+                            self.log.error(f'not get collect cycle minute')
+                            sys.exit(1)
 
-                # 取得時刻をリストに追加
-                rate_array.append(get_time)
-                macd_array.append(get_time)
-                stoch_array.append(get_time)
-
-                # numpyのndarrayに変換
-                rate_array  = np.array(rate_array)
-                macd_array  = np.array(macd_array) 
-                stoch_array = np.array(stoch_array)
-
-                #------------------------------------------------------------------------
-                # tradingview側でHTMLの変更があった場合に備えて
-                # 値に制限のある ストキャスティクスの値でスクレイピングの異常を検知する
-                #------------------------------------------------------------------------
-                if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
-                    self.log.critical(f'sotch value invalid : [{stoch_array}]')
-                    raise CloseMacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
-            except Exception as e:
-                self.log.critical(f'cant get macd stoch data : [{e}]')
-                driver.quit()
-                self.init_memb()
-                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
-            except KeyboardInterrupt:
-                driver.quit()
-                sys.exit(1)
-
-            
-
-            # データフレームとして作成しメンバーに登録(時系列では降順として作成)
-            bitf_rate_df_tmp = pd.DataFrame(rate_array.reshape(1, 5), columns=['open', 'high', 'low', 'close', 'get_time'])    
-            macd_df_tmp     = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
-            stoch_df_tmp    = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD', 'get_time'])   
-            self.bitf_rate_df = pd.concat([self.bitf_rate_df, bitf_rate_df_tmp], ignore_index=True)
-            self.macd_df  = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
-            self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)   
-            self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
-
-            # ファイル書き出し
-            try:
-                self._write_csv_dataframe(df=self.bitf_rate_df, path=CLOSE_RATE_FILE_PATH + self.bitf_rate_filename)
-                self._write_csv_dataframe(df=self.macd_df,      path=MACD_FILE_PATH       + self.macd_filename)
-                self._write_csv_dataframe(df=self.stoch_df,     path=STOCH_FILE_PATH      + self.stoch_filename)
-            except Exception as e:
-                self.log.critical(f'cant write macd stoch data : [{e}]')
-                driver.quit()
-                self.init_memb()
-                raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
-            self.log.info(f'dataframe to csv write done')
+                    #取得時間更新
+                    get_time_tmp = get_time
 
 
-            # データフレームが一定行数超えたら古い順から削除
-            if len(self.bitf_rate_df) > n_row: self.bitf_rate_df.drop(index=self.bitf_rate_df.index.min(), inplace=True)
-            if len(self.macd_df)      > n_row: self.macd_df.drop(index=self.macd_df.index.min(), inplace=True)
-            if len(self.stoch_df)     > n_row: self.stoch_df.drop(index=self.stoch_df.index.min(), inplace=True)
+                    # レートの値を取得
+                    rate_str = ind_array[0].text
+                    self.log.debug(f'rate_str : [{rate_str}]')
+                    open_rate  = int(rate_str.split('始値')[1].split('高値')[0])
+                    high_rate  = int(rate_str.split('高値')[1].split('安値')[0])
+                    low_rate   = int(rate_str.split('安値')[1].split('終値')[0])
+                    close_rate_str = rate_str.split('終値')[1].split('終値')[0]
+                    close_rate = int(re.split('[+|−|\s]', close_rate_str)[0])
+                    rate_array = [open_rate, high_rate, low_rate, close_rate] 
+
+
+                    # MACDとストキャスティクスをリストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
+                    macd_array  = ind_array[1].text.replace('−', '-').split('\n')
+                    stoch_array = ind_array[2].text.split('\n')
+                    self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
+
+                    # 文字列を数値へ変換
+                    macd_array  = [int(data) for data in macd_array]
+                    stoch_array = [float(data) for data in stoch_array]
+                    self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
+
+                    # 取得時刻をリストに追加
+                    rate_array.append(get_time)
+                    macd_array.append(get_time)
+                    stoch_array.append(get_time)
+
+                    # numpyのndarrayに変換
+                    rate_array  = np.array(rate_array)
+                    macd_array  = np.array(macd_array) 
+                    stoch_array = np.array(stoch_array)
+
+                    #------------------------------------------------------------------------
+                    # tradingview側でHTMLの変更があった場合に備えて
+                    # 値に制限のある ストキャスティクスの値でスクレイピングの異常を検知する
+                    #------------------------------------------------------------------------
+                    if ((stoch_array[:2] < 0.00).any() == True) or ((stoch_array[:2] > 100.00).any() == True):
+                        self.log.critical(f'sotch value invalid : [{stoch_array}]')
+                        raise CloseMacdStochScrapGetError(f'sotch value invalid : [{stoch_array}]')
+                except Exception as e:
+                    self.log.critical(f'cant get macd stoch data : [{e}]')
+                    driver.quit()
+                    self.init_memb()
+                    raise CloseMacdStochScrapGetError(f'scraping error : [{e}]')
+                except KeyboardInterrupt:
+                    driver.quit()
+                    sys.exit(1)
+
+                
+
+                # データフレームとして作成(時系列では降順)
+                bitf_rate_df_tmp = pd.DataFrame(rate_array.reshape(1, 5), columns=['open', 'high', 'low', 'close', 'get_time'])    
+                macd_df_tmp     = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
+                stoch_df_tmp    = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD', 'get_time'])   
+
+                self.bitf_rate_df = pd.concat([self.bitf_rate_df, bitf_rate_df_tmp], ignore_index=True)
+                self.macd_df  = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
+                self.stoch_df = pd.concat([self.stoch_df, stoch_df_tmp], ignore_index=True)   
+                self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
+
+                # ファイル書き出し
+                try:
+                    self._write_csv_dataframe(df=self.bitf_rate_df, path=CLOSE_RATE_FILE_PATH + self.bitf_rate_filename)
+                    self._write_csv_dataframe(df=self.macd_df,      path=MACD_FILE_PATH       + self.macd_filename)
+                    self._write_csv_dataframe(df=self.stoch_df,     path=STOCH_FILE_PATH      + self.stoch_filename)
+                except Exception as e:
+                    self.log.critical(f'cant write macd stoch data : [{e}]')
+                    driver.quit()
+                    self.init_memb()
+                    raise CloseMacdStochScrapGetError(f'cant open headless browser : [{e}]')
+                self.log.info(f'dataframe to csv write done')
+
+
+                # データフレームが一定行数超えたら古い順から削除
+                if len(self.bitf_rate_df) > n_row: self.bitf_rate_df.drop(index=self.bitf_rate_df.index.min(), inplace=True)
+                if len(self.macd_df)      > n_row: self.macd_df.drop(index=self.macd_df.index.min(), inplace=True)
+                if len(self.stoch_df)     > n_row: self.stoch_df.drop(index=self.stoch_df.index.min(), inplace=True)
 
 # test
-            print(self.bitf_rate_df)
-            print(self.macd_df)
-            print(self.stoch_df)
+                print(self.bitf_rate_df)
+                print(self.macd_df)
+                print(self.stoch_df)
 # test
 
 
@@ -1460,13 +1492,13 @@ class GmoTradUtil(object):
                 continue
             self.log.info(f'stoch close data to dataframe done')        
 
-            # 最新のmacd情報を取得（5行）
-            tmp_macd_df = macd_df.tail(n=5).reset_index(level=0, drop=True)
-            self.log.info(f'macd data : [{tmp_macd_df.to_json()}]')
-
-            if len(tmp_macd_df) < 3:
+            if len(macd_df) < 4:
                 await asyncio.sleep(sleep_sec)
                 continue
+
+            # 最新のmacd情報を取得（5行）
+            tmp_macd_df = macd_df.tail(n=4).reset_index(level=0, drop=True)
+            self.log.info(f'macd data : [{tmp_macd_df.to_json()}]')
 
             # macdが同じ値ならスリープしてスキップ
             if tmp_macd == tmp_macd_df['macd'][0]:
@@ -1476,46 +1508,32 @@ class GmoTradUtil(object):
             tmp_macd = tmp_macd_df['macd'][0]
 
 
-#            macd0 = tmp_macd_df['macd'][0]           
-#            macd1 = tmp_macd_df['macd'][1]
-#            macd2 = tmp_macd_df['macd'][2]
-#
-#            signal0 = tmp_macd_df['signal'][0]            
-#            signal1 = tmp_macd_df['signal'][1]
-#            signal2 = tmp_macd_df['signal'][2]
-#
-#            hist0 = tmp_macd_df['hist'][0]
-#            hist1 = tmp_macd_df['hist'][1]
-#            hist2 = tmp_macd_df['hist'][2]
-#
-#            # MACDとシグナルの傾き
-#            kmd1 = (macd1 - macd0) / 1
-#            kmd2 = (macd2 - macd1) / 1
-#
-#            ksg1 = (signal1 - signal0) / 1
-#            ksg2 = (signal2 - signal1) / 1
-#
-#            # MACDの傾きがシグナルの傾きの何倍か計算する（オリジナル指標）
-#            kmsx1 = kmd1 / ksg1
-#            kmsx2 = kmd2 / ksg2
-#            self.log.info(f'kmd1 : [{kmd1}] kmd2 : [{kmd2}]')
-## test
-#            self.log.info('===== macd =====')
-#            self.log.info(f'kmd1 : [{kmd1}] kmd2 : [{kmd2}]')
-#            self.log.info(f'ksg1 : [{ksg1}] ksg2 : [{ksg2}]')
-#            self.log.info(f'kmsx1 :[{kmsx1}] kmsx2 :[{kmsx2}]')
-#
-#            # 増減率
-#            kmdr1 = (macd1 - macd0) / macd0
-#            kmdr2 = (macd2 - macd1) / macd1
-#            ksgr1 = (signal1 - signal0) / signal0
-#            ksgr2 = (signal2 - signal1) / signal1
-#            # 積
-#            kmsrx1 = kmdr1 * ksgr1
-#            kmsrx2 = kmdr2 * ksgr2
-#            self.log.info(f'kmdr1 : [{kmdr1}] kmdr2 : [{kmdr2}]')
-#            self.log.info(f'ksgr1 : [{ksgr1}] ksgr2 : [{ksgr2}]')
-#            self.log.info(f'kmsrx1 : [{kmsrx1}] kmsrx2 : [{kmsrx2}]')
+            macd0 = tmp_macd_df['macd'][0]           
+            macd1 = tmp_macd_df['macd'][1]
+            macd2 = tmp_macd_df['macd'][2]
+            macd3 = tmp_macd_df['macd'][3]
+
+            signal0 = tmp_macd_df['signal'][0]            
+            signal1 = tmp_macd_df['signal'][1]
+            signal2 = tmp_macd_df['signal'][2]
+            signal3 = tmp_macd_df['signal'][3]
+
+            hist0 = tmp_macd_df['hist'][0]
+            hist1 = tmp_macd_df['hist'][1]
+            hist2 = tmp_macd_df['hist'][2]
+            hist3 = tmp_macd_df['hist'][3]
+
+
+            # MACDとシグナルの勾配を計算
+            km3 = (macd3 - macd2) / 1
+            ks3 = (signal3 - signal2) / 1
+# test
+            print('----------')
+            print(f'macd : {macd3}')
+            print(f'sig :  {signal3}')
+            print(f'km3 : {km3}')
+            print(f'ks3 : {ks3}')
+            print(f'km3 / ks3 : {km3/ks3}')
 
 
 
