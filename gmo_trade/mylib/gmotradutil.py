@@ -77,11 +77,13 @@ class ExchangStatusGetError(Exception):
     """
     pass
 
+
 class CloseRateGetError(Exception):
     """
     * closeレートを取得できない
     """
     pass
+
 
 class CloseMacdStochScrapGetError(Exception):
     """
@@ -89,11 +91,20 @@ class CloseMacdStochScrapGetError(Exception):
     """
     pass
 
+
+class CloseMacdStochStreamScrapGetError(Exception):
+    """
+    * tradingviewからスクレイピングでリアルタイムにMACD,ストキャスティクス関連情報を取得できない
+    """
+    pass
+
+
 class PosJudgementError(Exception):
     """
     * ポジション判定でのエラー
     """
     pass
+
 
 
 
@@ -842,7 +853,7 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10, trv_time_lag=7):
+    def scrap_macd_stoch_close(self, cycle_minute=15, sleep_sec=0.5, n_row=10, trv_time_lag=5):
         """
         * tradingviewの自作のチャートから15分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
@@ -852,7 +863,7 @@ class GmoTradUtil(object):
                          ただし1, 5, 15, 30, 60のみ設定可能
             sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
-            trv_time_lag:int (default 10) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
+            trv_time_lag:int (default 5) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
             　　　　　　　　　そのためチャートに反映されるまでスクレイピングしないよう停止(スリープ)させ
                               正しいインジケーターを取得させるようにする
         * return 
@@ -882,36 +893,38 @@ class GmoTradUtil(object):
             self.log.error('invalid argument cycle_minute')
             sys.exit(1)
 
-        while True:
-            self.log.info(f'scrap_macd_stoch_close() called cycle_minute:[{cycle_minute}]')
+        self.log.info(f'scrap_macd_stoch_close() called cycle_minute:[{cycle_minute}]')
 
-            # ブラウザ立ち上げ
-            try:
-                options = webdriver.ChromeOptions()
-                options.add_argument('--headless')
-                driver = webdriver.Chrome(options=options)
-                driver.set_window_size(1200, 900)
-                driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
-                # jsが反映されるまで待機
-                time.sleep(10)
+        # ブラウザ立ち上げ
+        try:
+            options = webdriver.ChromeOptions()
+            options.add_argument('--headless')
+            # セッションが切れないようにディレクトリにchrome関連のデータを保存するよう指定
+            options.add_argument('user-data-dir=chrome_scrap')
+            driver = webdriver.Chrome(options=options)
+            driver.set_window_size(1200, 900)
+            driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
+            # jsが反映されるまで待機
+            time.sleep(10)
 
-                # マウスオーバー
-                chart = driver.find_element_by_class_name('chart-gui-wrapper')
-                actions = ActionChains(driver)
-                actions.move_to_element(chart)
-                actions.move_by_offset(310, 100)
-                actions.perform()
+            # マウスオーバー
+            chart = driver.find_element_by_class_name('chart-gui-wrapper')
+            actions = ActionChains(driver)
+            actions.move_to_element(chart)
+            actions.move_by_offset(310, 100)
+            actions.perform()
 
-            except Exception as e:
-                self.log.critical(f'{e}')
-                driver.quit()
-                raise CloseMacdStochScrapGetError(f'browser set error :[{e}]')
+        except Exception as e:
+            self.log.critical(f'{e}')
+            driver.quit()
+            raise CloseMacdStochScrapGetError(f'browser set error :[{e}]')
 
-            self.log.info(f'browser set up done')
+        self.log.info(f'browser set up done')
             
-            #----------------------------------------------------------------------------------
-            # スクレイピングのサイクルとTradingviewの分足があっていなければ例外発生し停止させる
-            #----------------------------------------------------------------------------------
+        #----------------------------------------------------------------------------------
+        # スクレイピングのサイクルとTradingviewの分足があっていなければ例外発生し停止させる
+        #----------------------------------------------------------------------------------
+        while True:
             try:
                 title_attr = driver.find_element_by_class_name('titleWrapper-2KhwsEwE').text
                 title_minute = int(title_attr.split('\n')[1])
@@ -954,7 +967,6 @@ class GmoTradUtil(object):
                 # 同じ値だったらcontinue
                 if open_rate_tmp == open_rate:
                     self.log.info('bitflyer open rate same value :[{open_rate}]')
-                    driver.quit()
                     time.sleep(sleep_sec) 
                     continue
                 open_rate_tmp = open_rate
@@ -994,10 +1006,7 @@ class GmoTradUtil(object):
             except KeyboardInterrupt:
                 driver.quit()
                 sys.exit(1)
-           
-            # ブラウザ閉じる
-            driver.quit()
-            self.log.info(f'browser closed')
+
             
 
             # データフレームとして作成しメンバーに登録(時系列では降順として作成)
@@ -1055,6 +1064,8 @@ class GmoTradUtil(object):
         try:
             options = webdriver.ChromeOptions()
             options.add_argument('--headless')
+            # セッションが切れないようにディレクトリにchrome関連のデータを保存するよう指定
+            options.add_argument('user-data-dir=chrome_scrap_stream')
             driver = webdriver.Chrome(options=options)
             driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
     
