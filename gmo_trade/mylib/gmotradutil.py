@@ -1004,8 +1004,9 @@ class GmoTradUtil(object):
 
 
                     # MACDとストキャスティクスをリストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
+                    # ストキャスティクスもなぜか0.0の時に全角のマイナス表記がたまにあるため置換しておく
                     macd_array  = ind_array[1].text.replace('−', '-').split('\n')
-                    stoch_array = ind_array[2].text.split('\n')
+                    stoch_array = ind_array[2].text.replace('−', '-').split('\n')
                     self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
 
                     # 文字列を数値へ変換
@@ -1120,8 +1121,9 @@ class GmoTradUtil(object):
                 self.log.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
+                # なぜかストキャスティクスも0.0のときに全角マイナス表記があるため置換
                 macd_array  = ind_array[1].text.replace('−', '-').split('\n')
-                stoch_array = ind_array[2].text.split('\n')
+                stoch_array = ind_array[2].text.replace('−', '-').split('\n')
                 self.log.info(f'scraped to array : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 文字列を数値へ変換
