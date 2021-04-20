@@ -121,8 +121,8 @@ class GmoTradUtil(object):
         self.macd_df          = pd.DataFrame()  # macd確定値データ格納用
         self.stoch_df         = pd.DataFrame()  # ストキャスティクス確定値データ格納用
         self.pos_jdg_df       = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
-        self.pos_macd_jdg_df  = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
-        self.pos_stoch_jdg_df = pd.DataFrame([{'position':'STAY', 'jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
+        self.pos_macd_jdg_df  = pd.DataFrame([{'position':'STAY', 'macd':0, 'signal':0, 'hist':0, 'macd_jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
+        self.pos_stoch_jdg_df = pd.DataFrame([{'position':'STAY', 'pK':0.0, 'pK':0.0,'stoch_jdg_timestamp':datetime.datetime.now()}])  # ポジション計算用データフレーム
 
         # ファイル関連
         self.close_filename        = f"close_{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M')}"       # closeデータの書き出しファイル名
@@ -853,7 +853,7 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close(self, cycle_minute=1, sleep_sec=0.5, n_row=10, trv_time_lag=5):
+    def scrap_macd_stoch_close(self, cycle_minute=1, sleep_sec=0.1, n_row=10, trv_time_lag=7):
         """
         * tradingviewの自作のチャートから1分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
@@ -864,7 +864,7 @@ class GmoTradUtil(object):
                          ただし1, 5, 15, 30, 60のみ設定可能
             sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
-            trv_time_lag:int (default 5) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
+            trv_time_lag:int (default 7) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
             　　　　　　　　　そのためチャートに反映されるまでスクレイピングしないよう停止(スリープ)させ
                               正しいインジケーターを取得させるようにする
         * return 
@@ -947,7 +947,7 @@ class GmoTradUtil(object):
                     if now_time.minute in interval_minute_list and now_time.second == trv_time_lag:
                         break
                     time.sleep(sleep_sec) 
-                    self.log.info(f'not scraping time')
+#                    self.log.info(f'not scraping time')
                     continue
                 try:
                     # CSSセレクタで指定のクラスでelementを取得
@@ -997,8 +997,9 @@ class GmoTradUtil(object):
                     open_rate  = int(rate_str.split('始値')[1].split('高値')[0])
                     high_rate  = int(rate_str.split('高値')[1].split('安値')[0])
                     low_rate   = int(rate_str.split('安値')[1].split('終値')[0])
-                    close_rate_str = rate_str.split('終値')[1].split('終値')[0]
-                    close_rate = int(re.split('[+|−|\s]', close_rate_str)[0])
+                    close_rate_str = rate_str.split('終値')[1]
+                    # マイナスは全角で表記されているため全角指定
+                    close_rate = int(re.split('[+|−]', close_rate_str)[0])
                     rate_array = [open_rate, high_rate, low_rate, close_rate] 
 
 
@@ -1425,34 +1426,38 @@ class GmoTradUtil(object):
                 if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
                         # GX 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        tmp_df = pd.DataFrame({'position':'LONG','pK':last_stoch_df['pK'][1],'pD':last_stoch_df['pD'][1],\
+                                'stoch_jdg_timestamp':datetime.datetime.now()}, index=[0])
                         self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        self.log.info(f'position set LONG')
+                        self.log.info(f'position set LONG : tmp_df.to_json()')
            
             # SHORT目線
             elif last_stoch_df['pK'][0] >= hight_thresh:
                 if last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
                         # DX 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        tmp_df = pd.DataFrame({'position':'SHORT','pK':last_stoch_df['pK'][1],'pD':last_stoch_df['pD'][1],\
+                                'stoch_jdg_timestamp':datetime.datetime.now()}, index=[0])
                         self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        self.log.info(f'position set SHORT')
+                        self.log.info(f'position set SHORT : tmp_df.to_json()')
 
             # MINILONG or MINISHORT
             else:
                 if last_stoch_df['pK'][0] < last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] > last_stoch_df['pD'][1]:
                         # MINILONG 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'MINILONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        tmp_df = pd.DataFrame({'position':'MINILONG','pK':last_stoch_df['pK'][1],'pD':last_stoch_df['pD'][1],\
+                                'stoch_jdg_timestamp':datetime.datetime.now()}, index=[0])
                         self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        self.log.info(f'position set MINILONG')
+                        self.log.info(f'position set MINILONG : tmp_df.to_json()')
 
                 if last_stoch_df['pK'][0] > last_stoch_df['pD'][0]:
                     if last_stoch_df['pK'][1] < last_stoch_df['pD'][1]:
                         # MINISHORT 時系列では降順として作成
-                        tmp_df = pd.DataFrame({'position':'MINISHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+                        tmp_df = pd.DataFrame({'position':'MINISHORT','pK':last_stoch_df['pK'][1],'pD':last_stoch_df['pD'][1],\
+                                'stoch_jdg_timestamp':datetime.datetime.now()}, index=[0])
                         self.pos_stoch_jdg_df = pd.concat([tmp_df, self.pos_stoch_jdg_df], ignore_index=True)
-                        self.log.info(f'position set MINISHORT')
+                        self.log.info(f'position set MINISHORT : tmp_df.to_json()')
 
             await asyncio.sleep(sleep_sec)
 
@@ -1463,12 +1468,11 @@ class GmoTradUtil(object):
 
 
 
-    async def positioner_macd(self, hist_zero=100, kmsx_thresh=5, sleep_sec=1, n_row=5):
+    async def positioner_macd(self, hist_zero=100, sleep_sec=1, n_row=5):
         """
         * macdの情報によりポジション判定を行う
         * param
             hist_zero:int (default 100) 反発系での判定でヒストグラムの絶対値がこの閾値以下であればゼロとみなす
-            kms_thresh:int MACDとシグナルの傾きの積の閾値(オリジナル指標).閾値以下の場合GX or DX間近
             sleep_sec:int (default 1) スリープ秒
             n_row:int (default 5) ポジション情報を保持するdataframeのレコード数。超えると古いものから削除する
         * return
@@ -1524,16 +1528,26 @@ class GmoTradUtil(object):
             hist3 = tmp_macd_df['hist'][3]
 
 
-            # MACDとシグナルの勾配を計算
+            # MACDとシグナルの増減率を計算
             km3 = (macd3 - macd2) / 1
             ks3 = (signal3 - signal2) / 1
+            dvms = km3 / ks3
+
+            rm3 = (macd3 - macd2) / abs(macd2)
+            rs3 = (signal3 - signal2) / abs(signal2)
+            rms3 = rm3 / rs3
 # test
             print('----------')
-            print(f'macd : {macd3}')
-            print(f'sig :  {signal3}')
+            print(datetime.datetime.now())
+            print(f'macd3 : {macd3}   | macd2  : {macd2}')
+            print(f'sig3  : {signal3} | signal2: {signal2}')
             print(f'km3 : {km3}')
             print(f'ks3 : {ks3}')
-            print(f'km3 / ks3 : {km3/ks3}')
+            print(f'km3 / ks3 : {dvms}')
+            print('-')
+            print(f'rm3 : {rm3} | rs3 : {rs3}')
+            print(f'rms3 : {rms3}')
+
 
 
 
@@ -1549,7 +1563,7 @@ class GmoTradUtil(object):
 #
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set LONG : pattern [GX]')
@@ -1560,7 +1574,7 @@ class GmoTradUtil(object):
 #            elif macd0 > signal0 and macd2 < signal2:
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set SHORT : pattern [DX]')
@@ -1572,7 +1586,7 @@ class GmoTradUtil(object):
 #
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set LONG : pattern [rebound LONG]')
@@ -1584,7 +1598,7 @@ class GmoTradUtil(object):
 #
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set SHORT : pattern [rebound SHORT]')
@@ -1595,7 +1609,7 @@ class GmoTradUtil(object):
 #            elif ((hist0 < 0) and (hist1 < 0) and (hist2 < 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'LONG', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'LONG', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set LONG : pattern [nearness GX]')
@@ -1606,7 +1620,7 @@ class GmoTradUtil(object):
 #            elif ((hist0 > 0) and (hist1 > 0) and (hist2 > 0)) and ((kms1 > 0) and (kms2 <= kms_thresh)):
 #                # 時系列では降順として作成
 #                if is_position == False:
-#                    tmp_df = pd.DataFrame({'position':'SHORT', 'jdg_timestamp':datetime.datetime.now()}, index=[0])
+#                    tmp_df = pd.DataFrame({'position':'SHORT', 'macd_jdg_timestamp':datetime.datetime.now()}, index=[0])
 #                    self.pos_macd_jdg_df = pd.concat([tmp_df, self.pos_macd_jdg_df], ignore_index=True)
 #                    is_position = True
 #                    self.log.info(f'position set SHORT : pattern [nearness DX]')
