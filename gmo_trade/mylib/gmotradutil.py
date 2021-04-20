@@ -999,7 +999,7 @@ class GmoTradUtil(object):
                     low_rate   = int(rate_str.split('安値')[1].split('終値')[0])
                     close_rate_str = rate_str.split('終値')[1]
                     # マイナスは全角で表記されているため全角指定
-                    close_rate = int(re.split('[+|−]', close_rate_str)[0])
+                    close_rate = int(re.split('[+|−|\s]', close_rate_str)[0])
                     rate_array = [open_rate, high_rate, low_rate, close_rate] 
 
 
