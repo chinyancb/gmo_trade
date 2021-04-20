@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 import re
+import shutil
 import logging
 import logging.config
 from pathlib import Path
@@ -853,20 +854,21 @@ class GmoTradUtil(object):
 
 
 
-    def scrap_macd_stoch_close(self, cycle_minute=1, sleep_sec=0.1, n_row=10, trv_time_lag=7):
+    def scrap_macd_stoch_close(self, cycle_minute=1, sleep_sec=0.1, n_row=10, trv_time_lag=np.arange(5, 10), headless=True):
         """
         * tradingviewの自作のチャートから1分足のopen,high,low,close, macd,ストキャスティクスの値を取得する
           →https://jp.tradingview.com/chart/wTJWkxIA/
            !!!必ずトレーディングビューの分足とcycle_minuteの時間を合わせること
-           !!!ウォッチリスト表示の形式でチャートが保存されていることが前提
+           !!!データウィンドウから時刻を取得しているため,データウィンドウも表示されてる状態でが保存されていることが前提
         * param
             cycle_minute:int (default 1) スクレイピングする間隔（分）※1時間の場合は60で設定
                          ただし1, 5, 15, 30, 60のみ設定可能
-            sleep_sec:int (default 5) sleep秒 ※1秒以下推奨
+            sleep_sec:int (default 5) sleep秒 
             n_row:int (default 10) データを保持する行数。超えると古いものから削除される
-            trv_time_lag:int (default 7) ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
+            trv_time_lag:array-like  ビットフライヤーの値がtradingviewに反映されるまでラグが発生する場合がある
             　　　　　　　　　そのためチャートに反映されるまでスクレイピングしないよう停止(スリープ)させ
                               正しいインジケーターを取得させるようにする
+            headless:bool Trueの場合はヘッドレスブラウザで実行、Falseの場合は通常のブラウザで実行
         * return 
             なし
                 データ取得成功 :self.ind_dfにデータ時系列で降順で格納される
@@ -890,19 +892,33 @@ class GmoTradUtil(object):
             self.log.error('invalid argument cycle_minute')
             sys.exit(1)
 
-        self.log.info(f'scrap_macd_stoch_close() called cycle_minute:[{cycle_minute}]')
+        self.log.info(f'scrap_macd_stoch_close() called. cycle_minute:[{cycle_minute}]')
 
         # ブラウザ立ち上げ
         try:
             options = webdriver.ChromeOptions()
-            options.add_argument('--headless')
+            if headless == True:
+                options.add_argument('--headless')
             # セッションが切れないようにディレクトリにchrome関連のデータを保存するよう指定
-            options.add_argument('user-data-dir=chrome_scrap')
+#            options.add_argument('user-data-dir=chrome_scrap')
             driver = webdriver.Chrome(options=options)
-            driver.set_window_size(1200, 900)
+            # jsが反映されるまで10秒待機(getより前に実施)
+            driver.implicitly_wait(10)
             driver.get('https://jp.tradingview.com/chart/wTJWkxIA/')
+            driver.set_window_size(1200, 900)
             # jsが反映されるまで待機
-            time.sleep(10)
+#            time.sleep(15)
+            self.log.info(f'accessed tradingview site done')
+
+            # データウィンドウクリック
+            button = driver.find_elements_by_css_selector('.button-DABaJZo4.isTab-DABaJZo4.isGrayed-DABaJZo4.apply-common-tooltip.common-tooltip-vertical')
+            loc = button[3].location
+            x, y = loc['x'], loc['y']
+            actions = ActionChains(driver)
+            actions.move_by_offset(x, y)
+            actions.click()
+            actions.perform()
+            self.log.info(f'data-window click done')
 
             # マウスオーバー
             chart = driver.find_element_by_class_name('chart-gui-wrapper')
@@ -910,6 +926,7 @@ class GmoTradUtil(object):
             actions.move_to_element(chart)
             actions.move_by_offset(310, 100)
             actions.perform()
+            self.log.info(f'mouse over done')
 
         except Exception as e:
             self.log.critical(f'{e}')
@@ -938,57 +955,78 @@ class GmoTradUtil(object):
 
 
             # スクレイピング
-            # 取得した時間と始値もとにで同時刻以内に複数回ループすることを防ぐ
-            get_time_tmp  = datetime.datetime.now()
+            # closeの時刻をもとに同時刻以内に複数回ループすることを防ぐ
+            close_time_tmp = '' 
             while True:
+                self.log.debug(f'scraping start')
                 while True:
                     now_time = datetime.datetime.now()
                     # tredingviewでcloseがチャートに反映にタイムラグが生じることを考慮し秒で調整する
-                    if now_time.minute in interval_minute_list and now_time.second == trv_time_lag:
+                    if now_time.minute in interval_minute_list and now_time.second in trv_time_lag:
                         break
                     time.sleep(sleep_sec) 
-#                    self.log.info(f'not scraping time')
                     continue
+
+                # トレーディングビューのデータウィンドウからマウスオーバーしたローソクの時刻を取得
+                # 値が取得できたりできなかったりするためtry文で暫定対応
                 try:
+                    close_time_array = driver.find_elements_by_css_selector('.chart-data-window-item-value > span')
+                    close_time_ymd   = close_time_array[0].text
+                    close_time_hm    = close_time_array[1].text
+                except Exception as e:
+                    self.log.warning('cant get close time. retry')
+                    continue
+
+
+                # 同時刻の場合はcontinue
+                if close_time_hm == close_time_tmp:
+                    self.log.debug(f'same close time. close_time_hm:[{close_time_hm}] close_time_tmp:[{close_time_tmp}]')
+                    continue
+                close_time_tmp = close_time_hm
+
+
+                # closeの時刻をstring型からdatetimeオブジェクトに変換
+                close_time_ymd_list = close_time_ymd.split('-')
+                close_time_ymd_list = [int(t) for t in close_time_ymd_list]
+                close_time_hm_list  = close_time_hm.split(':')
+                close_time_hm_list  = [int(t) for t in close_time_hm_list]
+                close_time = datetime.datetime(close_time_ymd_list[0], close_time_ymd_list[1], close_time_ymd_list[2],\
+                        close_time_hm_list[0], close_time_hm_list[1])
+
+                try:    
                     # CSSセレクタで指定のクラスでelementを取得
                     ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
-                    get_time = datetime.datetime.now()
                     self.log.info(f'got elements :[{ind_array}]')
 
-                    # 同時刻内に複数回ループすることを防ぐため取得した時間が5秒未満であればcontinue
-                    if (get_time - get_time_tmp) < datetime.timedelta(seconds=5):
-                        self.log.info(f'get time invalid')
-                        continue
 
                     # サイクル通りにデータが取得できていない場合は例外を発生させる(トレーディングビューにラグがあるため）
+                    
                     if cycle_minute == 1:
-                        if get_time.minute not in np.arange(0, 60, 1):
-                            raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
-                            self.log.error(f'not get collect cycle minute')
-                            sys.exit(1)
+                        # 1分足の場合はデフォルト引数により最長で70秒かかるため70秒より長いとアウト
+                        # 頻発するので例外は発生させずcontinue
+                        if now_time - close_time > datetime.timedelta(seconds=70):
+                            self.log.warning(f'not get collect cycle minute. retry | now_time:[{now_time} close_time:[{close_time}]')
+                            continue
                     elif cycle_minute == 5:
-                        if get_time.minute not in np.arange(0, 60, 5):
+                        if close_time.minute not in np.arange(0, 60, 5):
                             raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
                             self.log.error(f'not get collect cycle minute')
                             sys.exit(1)
                     elif cycle_minute == 15:
-                        if get_time.minute not in np.arange(0, 60, 15):
+                        if close_time.minute not in np.arange(0, 60, 15):
                             raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
                             self.log.error(f'not get collect cycle minute')
                             sys.exit(1)
                     elif cycle_minute == 30:
-                        if get_time.minute not in np.arange(0, 60, 30):
+                        if close_time.minute not in np.arange(0, 60, 30):
                             raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
                             self.log.error(f'not get collect cycle minute')
                             sys.exit(1)
                     elif cycle_minute == 60:
-                        if get_time.minute not in  np.array([0]):
+                        if close_time.minute not in  np.array([0]):
                             raise CloseMacdStochScrapGetError(f'not get collect cycle minute')
                             self.log.error(f'not get collect cycle minute')
                             sys.exit(1)
-
-                    #取得時間更新
-                    get_time_tmp = get_time
 
 
                     # レートの値を取得
@@ -1015,9 +1053,9 @@ class GmoTradUtil(object):
                     self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
 
                     # 取得時刻をリストに追加
-                    rate_array.append(get_time)
-                    macd_array.append(get_time)
-                    stoch_array.append(get_time)
+                    rate_array.append(close_time)
+                    macd_array.append(close_time)
+                    stoch_array.append(close_time)
 
                     # numpyのndarrayに変換
                     rate_array  = np.array(rate_array)
@@ -1043,9 +1081,9 @@ class GmoTradUtil(object):
                 
 
                 # データフレームとして作成(時系列では降順)
-                bitf_rate_df_tmp = pd.DataFrame(rate_array.reshape(1, 5), columns=['open', 'high', 'low', 'close', 'get_time'])    
-                macd_df_tmp     = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
-                stoch_df_tmp    = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD', 'get_time'])   
+                bitf_rate_df_tmp = pd.DataFrame(rate_array.reshape(1, 5), columns=['open', 'high', 'low', 'close', 'close_time'])    
+                macd_df_tmp     = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'close_time'])    
+                stoch_df_tmp    = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD', 'close_time'])   
 
                 self.bitf_rate_df = pd.concat([self.bitf_rate_df, bitf_rate_df_tmp], ignore_index=True)
                 self.macd_df  = pd.concat([self.macd_df, macd_df_tmp], ignore_index=True)
@@ -1075,7 +1113,7 @@ class GmoTradUtil(object):
                 print(self.macd_df)
                 print(self.stoch_df)
 # test
-
+                self.log.info(f'scraping 1cycle done')
 
 
     def scrap_macd_stoch_stream(self, sleep_sec=3, n_row=20):
@@ -1117,7 +1155,7 @@ class GmoTradUtil(object):
             try:
                 # CSSセレクタで指定のクラスでelementを取得
                 ind_array = driver.find_elements_by_css_selector('.valuesWrapper-2KhwsEwE')
-                get_time = datetime.datetime.now()
+                close_time = datetime.datetime.now()
                 self.log.info(f'got elements :[{ind_array}]')
 
                 # リストに変換(MACDはマイナスが全角表記になっているためreplaceで置換しておく
@@ -1132,8 +1170,8 @@ class GmoTradUtil(object):
                 self.log.info(f'converted numeric : [macd {macd_array}, stoch {stoch_array}]')
 
                 # 取得時刻をリストに追加
-                macd_array.append(get_time)
-                stoch_array.append(get_time)
+                macd_array.append(close_time)
+                stoch_array.append(close_time)
 
                 # numpyのndarrayに変換
                 macd_array  = np.array(macd_array) 
@@ -1157,8 +1195,8 @@ class GmoTradUtil(object):
                 sys.exit(1)
 
             # データフレームとして作成しメンバーに登録(時系列では降順として作成)
-            macd_stream_df_tmp   = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'get_time'])    
-            stoch_stream_df_tmp  = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD','get_time'])   
+            macd_stream_df_tmp   = pd.DataFrame(macd_array.reshape(1, 4), columns=['hist', 'macd', 'signal', 'close_time'])    
+            stoch_stream_df_tmp  = pd.DataFrame(stoch_array.reshape(1, 3), columns=['pK', 'pD','close_time'])   
             self.macd_stream_df  = pd.concat([macd_stream_df_tmp, self.macd_stream_df], ignore_index=True)
             self.stoch_stream_df = pd.concat([stoch_stream_df_tmp, self.stoch_stream_df], ignore_index=True)   
             self.log.info(f'memb registed done : [macd {macd_array}, stoch {stoch_array}]')
@@ -1398,9 +1436,9 @@ class GmoTradUtil(object):
         while True:
             self.log.info(f'positioner_stoch() called')        
 
-            # ストキャスティクスcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
+            # ストキャスティクスcloseデータ読み込み(close_timeはnumpyのdatetime型で指定)
             try:
-                stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
+                stoch_df = self._read_csv_dataframe(path=STOCH_FILE_PATH, filename=None, dtypes={'close_time':'np.datetime[64]'}) 
             except Exception as e:
                 self.log.error(f'{e}')
                 await asyncio.sleep(sleep_sec)
@@ -1489,9 +1527,9 @@ class GmoTradUtil(object):
 
         while True:
 
-            # macdのcloseデータ読み込み(get_timeはnumpyのdatetime型で指定)
+            # macdのcloseデータ読み込み(close_timeはnumpyのdatetime型で指定)
             try:
-                macd_df = self._read_csv_dataframe(path=MACD_FILE_PATH, filename=None, dtypes={'get_time':'np.datetime[64]'}) 
+                macd_df = self._read_csv_dataframe(path=MACD_FILE_PATH, filename=None, dtypes={'close_time':'np.datetime[64]'}) 
             except Exception as e:
                 self.log.error(f'{e}')
                 await asyncio.sleep(sleep_sec)
