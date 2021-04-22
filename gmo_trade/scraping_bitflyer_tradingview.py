@@ -3,7 +3,8 @@ import logging
 import time
 from pathlib import Path
 import mylib.gmotradutil as gtu
-from mylib.gmotradutil import ExchangStatusGetError, CloseRateGetError, MacdStochScrapGetError
+import mylib.lineutil as lu
+from mylib.gmotradutil import  CloseMacdStochScrapGetError
 
 #------------------------------
 # アプリケーションのパスを指定
@@ -19,20 +20,33 @@ def main():
     log.info(f'----- start -----')
     while True:
         try:
+            line = lu.LineUtil()
             trd = gtu.GmoTradUtil()
             trd.set_logging('scraping')
-            trd.scrap_macd_stoch()
-        except MacdStochScrapGetError as e:
-            log.critical(f'{e}')
+            #trd.scrap_macd_stoch_close(headless=False)
+            trd.scrap_macd_stoch_close()
+        except CloseMacdStochScrapGetError as e:
+            log.critical(f'CloseMacdStochScrapGetError :[{e}]')
+            trd.set_logging('scraping')
+            line.send_line_notify(msg=f'\
+                    スクレイピング処理に失敗しました。\
+                    メンバーを初期化し、スクレイピングプロセスを停止します。\
+                    エラー内容↓\
+                    CloseMacdStochScrapGetError :[{e}]'
+                    )
+            trd.init_memb()
             sys.exit(1)
         except Exception as e:
             log.error(f'{e}')
             del (trd)
-            trd.init_memb()
             trd = gtu.GmoTradUtil()
             trd.set_logging('scraping')
+            trd.init_memb()
             time.sleep(10)
-        continue
+            continue
+        except KeyboardInterrupt:
+            log.info('KeyboardInterrupt stop')
+            sys.exit(1)
 
 
 
