@@ -30,7 +30,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from mylib.lineutil import LineUtil
 from mylib.bitfilyertradutil import BitfilyerTradUtil
-#from  mylib.websocketutil import WebSocketUtil
+from  mylib.websocketutil import WebSocketUtil
 
 #------------------------------
 # アプリケーションのパスを指定
